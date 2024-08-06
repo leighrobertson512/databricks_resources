@@ -7,7 +7,8 @@ What this will do
 
 # COMMAND ----------
 
-dbutils.fs.ls('s3://one-env/leigh_robertson/delta_tables/prod/raw/')
+location_of_s3_files = 's3://SAMPLE_FILE_PATH'
+dbutils.fs.ls(location_of_s3_files)
 
 # COMMAND ----------
 
@@ -34,7 +35,7 @@ schema = """
     col10 DOUBLE
 """
 table_name = "leigh_robertson_demo.raw.sample_table"
-s3_location = "s3://one-env/leigh_robertson/delta_tables/prod/raw/sample_table"
+s3_location = location_of_s3_files
 # Create a DataFrame with 10,000 rows using the defined schema
 df = spark.range(0, 10000).withColumn("col1", rand()).withColumn("col2", randn())\
     .withColumn("col3", rand()).withColumn("col4", randn())\
@@ -68,7 +69,7 @@ schema = """
     col10 DOUBLE
 """
 table_name = "leigh_robertson_demo.raw.sample_table_w_issues"
-s3_location = "s3://one-env/leigh_robertson/delta_tables/prod/raw/sample_table_w_issues"
+s3_location = location_of_s3_files_w_issues
 # Create a DataFrame with 10,000 rows using the defined schema
 df = spark.range(0, 10000).withColumn("col1", rand()).withColumn("col2", randn())\
     .withColumn("col3", rand()).withColumn("col4", randn())\
@@ -164,7 +165,7 @@ def left_join_dfs(s3_location_df, databricks_tables_df):
 #get all tables in catalog
 catalog = "leigh_robertson_demo"
 schema = "raw"
-s3_path_where_tables_are = 's3://one-env/leigh_robertson/delta_tables/prod/raw/'
+s3_path_where_tables_are = location_of_s3_files
 tables_df = describe_catalog_schema(catalog, schema)
 
 # get all s3 files
