@@ -231,46 +231,16 @@ spark.sql("ALTER TABLE leigh_robertson_demo.bronze_noaa.forecasts SET TBLPROPERT
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC --CREATE OR REPLACE MATERIALIZED VIEW leigh_robertson_demo.silver_noaa.silver_noaa_forecasts_mv_v1 AS
-# MAGIC SELECT 
-# MAGIC   zip_code.state,
-# MAGIC   'highest' AS temperature_type,
-# MAGIC   zip_code.post_code,
-# MAGIC   zip_code.place_name,
-# MAGIC   forecasts.temperature,
-# MAGIC   forecasts.probabilityOfPrecipitation,
-# MAGIC   forecasts.windSpeed
-# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_manual_cdc AS forecasts
-# MAGIC INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS zip_code
-# MAGIC     ON forecasts.post_code = zip_code.post_code
-# MAGIC WHERE cast(forecasts.startTimeUTC AS date) = :date
-# MAGIC   AND forecasts.temperature = (
-# MAGIC     SELECT MAX(f.temperature)
-# MAGIC     FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_manual_cdc AS f
-# MAGIC     INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS z
-# MAGIC         ON f.post_code = z.post_code
-# MAGIC     WHERE cast(f.startTimeUTC AS date) = :date
-# MAGIC       AND z.state = zip_code.state
-# MAGIC   )
-# MAGIC UNION ALL
-# MAGIC SELECT 
-# MAGIC   zip_code.state,
-# MAGIC   'lowest' AS temperature_type,
-# MAGIC   zip_code.post_code,
-# MAGIC   zip_code.place_name,
-# MAGIC   forecasts.temperature,
-# MAGIC   forecasts.probabilityOfPrecipitation,
-# MAGIC   forecasts.windSpeed
-# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_manual_cdc AS forecasts
-# MAGIC INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS zip_code
-# MAGIC     ON forecasts.post_code = zip_code.post_code
-# MAGIC WHERE cast(forecasts.startTimeUTC AS date) = :date
-# MAGIC   AND forecasts.temperature = (
-# MAGIC     SELECT MIN(f.temperature)
-# MAGIC     FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_manual_cdc AS f
-# MAGIC     INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS z
-# MAGIC         ON f.post_code = z.post_code
-# MAGIC     WHERE cast(f.startTimeUTC AS date) = :date
-# MAGIC       AND z.state = zip_code.state
-# MAGIC   )
+# MAGIC %sql 
+# MAGIC SELECT count(*)
+# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_dlt;
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC SELECT count(*)
+# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_ss;
+
+# COMMAND ----------
+
+

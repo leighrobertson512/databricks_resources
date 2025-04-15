@@ -113,15 +113,5 @@ query = stream_df.writeStream \
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC SELECT count(*)
+# MAGIC SELECT *
 # MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_ss
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT count(*)
-# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_dlt
-
-# COMMAND ----------
-
-

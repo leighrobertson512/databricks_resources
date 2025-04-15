@@ -52,7 +52,7 @@ def get_and_load_forecasts(postal_code, country_code):
 
     table_name = 'leigh_robertson_demo.bronze_noaa.forecasts'
     match_columns, update_columns, insert_columns = generate_match_insert_columns("post_code, startTime", df_spark)
-    merge_sql = dynamic_merge_sql(table_name, match_columns, update_columns, insert_columns)
+    merge_sql = dynamic_merge_sql(table_name, "updates", match_columns, update_columns, insert_columns)
     df_spark.createOrReplaceTempView("updates")
     spark.sql(merge_sql)
     print(f'loaded forecasts for {postal_code} and country {country_code}')
@@ -78,6 +78,11 @@ for row in df.collect():
 # MAGIC %sql 
 # MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.forecasts;
 # MAGIC VACUUM leigh_robertson_demo.bronze_noaa.forecasts;
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC DESCRIBE HISTORY leigh_robertson_demo.bronze_noaa.forecasts;
 
 # COMMAND ----------
 
