@@ -243,4 +243,39 @@ spark.sql("ALTER TABLE leigh_robertson_demo.bronze_noaa.forecasts SET TBLPROPERT
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC WITH base AS (
+# MAGIC SELECT 
+# MAGIC   forecasts.startTime,
+# MAGIC   zip_code.place_name,
+# MAGIC   zip_code.state,
+# MAGIC   zip_code.post_code,
+# MAGIC   forecasts.temperature,
+# MAGIC   forecasts.probabilityOfPrecipitation,
+# MAGIC   forecasts.windSpeed,
+# MAGIC   CAST(forecasts.startTimeUTC AS DATE) AS forecast_date_utc,
+# MAGIC   CAST(forecasts.startTime AS DATE) AS forecast_date_local_tz
+# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_dlt AS forecasts
+# MAGIC INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS zip_code
+# MAGIC   ON forecasts.post_code = zip_code.post_code
+# MAGIC WHERE CAST(forecasts.startTimeUTC AS DATE) BETWEEN 
+# MAGIC current_date() AND 
+# MAGIC DATE_ADD(current_date(), 10)
+# MAGIC AND zip_code.post_code = 80214      
+# MAGIC ORDER BY forecast_date_utc ASC, forecasts.startTime ASC
+# MAGIC )
+# MAGIC SELECT forecast_date_local_tz,
+# MAGIC max(temperature) AS max_temperature,
+# MAGIC min(temperature) AS min_temperature
+# MAGIC FROM base 
+# MAGIC GROUP BY ALL
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC SELECT count(*)
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts
+
+# COMMAND ----------
+
 
