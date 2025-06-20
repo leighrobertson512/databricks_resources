@@ -1,4 +1,8 @@
 # Databricks notebook source
+spark.conf.set("spark.sql.files.ignoreMissingFiles", "true")
+
+# COMMAND ----------
+
 from delta.tables import DeltaTable
 from pyspark.sql.functions import col, current_timestamp, lit
 source_table = 'leigh_robertson_demo.bronze_noaa.forecasts'
