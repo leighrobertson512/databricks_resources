@@ -1,7 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Databricks Structured Streaming Demo
+# MAGIC # Weather Data Structured Streaming Demo
 # MAGIC ## Solutions Architect Demo: Common Patterns, Issues, and Best Practices
+# MAGIC 
+# MAGIC **Based on NOAA Weather Data Pipeline**
 # MAGIC 
 # MAGIC This demo covers:
 # MAGIC - **Common Issues**: Skew, Spill, Shuffle
@@ -20,211 +22,450 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install dbldatagen==0.4.0
-
-# COMMAND ----------
-
 import random
 import time
 from datetime import datetime, timedelta
 from pyspark.sql import functions as F
 from pyspark.sql.types import *
 from pyspark.sql.streaming import StreamingQuery
-from delta import DeltaTable
-import dbldatagen as dg
+from delta.tables import DeltaTable
 
-# Configuration
-catalog_name = "dlt_demo_lr"
-schema_name = "streaming_demo"
-volume_name = "raw_data"
+# Configuration based on your existing setup
+source_table = 'leigh_robertson_demo.bronze_noaa.forecasts'
+silver_table = "leigh_robertson_demo.silver_noaa.forecasts_ss"
+demo_checkpoint_base = "s3://one-env/leigh_robertson/streaming_metadata/demo/"
 
-# Create catalog and schema if they don't exist
-spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog_name}")
-spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog_name}.{schema_name}")
+print("Weather Streaming Demo Configuration:")
+print(f"Source Table: {source_table}")
+print(f"Silver Table: {silver_table}")
+print(f"Checkpoint Base: {demo_checkpoint_base}")
 
-# Create volume for raw data
-try:
-    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog_name}.{schema_name}.{volume_name}")
-except:
-    print("Volume already exists or permission issue")
-
-volume_path = f"/Volumes/{catalog_name}/{schema_name}/{volume_name}"
-checkpoint_path = f"{volume_path}/checkpoints"
-output_path = f"{volume_path}/output"
-
-# Create directories
-dbutils.fs.mkdirs(f"{volume_path}/source_data")
-dbutils.fs.mkdirs(checkpoint_path)
-dbutils.fs.mkdirs(output_path)
-
-print(f"Volume path: {volume_path}")
+# Clean up any existing streams
+for stream in spark.streams.active:
+    print(f"Stopping existing stream: {stream.name}")
+    stream.stop()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Data Generation
-# MAGIC Creating realistic taxi trip data with patterns that will demonstrate streaming concepts
+# MAGIC ## Data Generation for Continuous Streaming
+# MAGIC Creating a continuous data generator to simulate real-time weather data updates
 
 # COMMAND ----------
 
-def generate_taxi_trip_data(num_records=50000):
-    """Generate realistic taxi trip data with potential skew and various patterns"""
+def generate_weather_data_batch(postal_codes, batch_size=100):
+    """Generate simulated weather forecast data for continuous streaming"""
+    from pyspark.sql.functions import rand, randn, when
+    from datetime import datetime, timedelta
     
-    # NYC zip codes with intentional skew (some zips more common)
-    nyc_zip_codes = [10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009, 10010,
-                     10011, 10012, 10013, 10014, 10016, 10017, 10018, 10019, 10020, 10021]
+    # Create base data with random weather patterns
+    data = []
+    for i in range(batch_size):
+        postal_code = random.choice(postal_codes)
+        base_time = datetime.now() + timedelta(hours=random.randint(0, 168))  # Next 7 days
+        
+        # Simulate realistic weather patterns
+        temperature = random.randint(-10, 100)
+        humidity = random.randint(10, 100)
+        precipitation_prob = min(100, max(0, random.randint(0, 100)))
+        
+        data.append({
+            'post_code': str(postal_code),
+            'number': i,
+            'name': f'Weather Forecast {i}',
+            'startTime': base_time.strftime('%Y-%m-%dT%H:%M:%S-05:00'),
+            'endTime': (base_time + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S-05:00'),
+            'isDaytime': base_time.hour >= 6 and base_time.hour <= 18,
+            'temperature': temperature,
+            'temperatureUnit': 'F',
+            'temperatureTrend': None,
+            'probabilityOfPrecipitation': {'value': precipitation_prob},
+            'dewpoint': {'value': float(temperature - random.randint(10, 30))},
+            'relativeHumidity': {'value': humidity},
+            'windSpeed': f"{random.randint(5, 25)} mph",
+            'windDirection': random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']),
+            'icon': 'https://api.weather.gov/icons/land/day/clear',
+            'shortForecast': random.choice(['Sunny', 'Partly Cloudy', 'Cloudy', 'Rain', 'Snow']),
+            'detailedForecast': f'Temperature around {temperature}°F with {precipitation_prob}% chance of precipitation.'
+        })
     
-    # Create skewed distribution for pickup locations
-    skewed_zips = [10001] * 40 + [10002] * 30 + [10003] * 20 + nyc_zip_codes[3:] * 2
-    
-    ds = (
-        dg.DataGenerator(spark, name="taxi_trips", rows=num_records, partitions=4)
-        .withIdOutput()
-        .withColumn("trip_id", LongType(), minValue=1000000, maxValue=9999999, uniqueValues=num_records)
-        .withColumn("taxi_id", IntegerType(), minValue=1, maxValue=1000, random=True)
-        .withColumn("driver_id", IntegerType(), minValue=1000, maxValue=5000, random=True)
-        .withColumn("passenger_count", IntegerType(), 
-                   values=[1, 2, 3, 4, 5, 6], 
-                   weights=[50, 30, 15, 3, 1, 1], random=True)
-        .withColumn("pickup_zip", IntegerType(), values=skewed_zips, random=True)
-        .withColumn("dropoff_zip", IntegerType(), values=nyc_zip_codes, random=True)
-        .withColumn("trip_distance", FloatType(), minValue=0.1, maxValue=50.0, random=True)
-        .withColumn("fare_amount", FloatType(), minValue=5.0, maxValue=500.0, random=True)
-        .withColumn("tip_amount", FloatType(), minValue=0.0, maxValue=100.0, random=True)
-        .withColumn("payment_type", StringType(), 
-                   values=["credit_card", "cash", "mobile"], 
-                   weights=[70, 25, 5], random=True)
-        .withColumn("pickup_datetime", TimestampType(),
-                   begin="2024-01-01 00:00:00",
-                   end="2024-12-31 23:59:59",
-                   interval="1 minute")
-        .withColumn("vendor_id", IntegerType(), values=[1, 2, 3], random=True)
-        .withColumn("rate_code", IntegerType(), values=[1, 2, 3, 4, 5], weights=[80, 10, 5, 3, 2])
-    )
-    
-    return ds.build().drop("id")
+    df = spark.createDataFrame(data)
+    return df.withColumn('audit_update_ts', F.current_timestamp())
 
-# Generate initial batch of data
-print("Generating initial taxi trip data...")
-df = generate_taxi_trip_data(100000)
+# Get postal codes from your existing data
+postal_codes_df = spark.sql("""
+    SELECT DISTINCT post_code 
+    FROM leigh_robertson_demo.bronze_noaa.zip_code 
+    WHERE state_abbreviation = 'NY'
+    LIMIT 20
+""")
+postal_codes = [row.post_code for row in postal_codes_df.collect()]
+print(f"Using {len(postal_codes)} postal codes for demo: {postal_codes[:5]}...")
 
-# Add calculated fields that will be useful for streaming demos
-df_enhanced = (df
-    .withColumn("pickup_hour", F.hour("pickup_datetime"))
-    .withColumn("pickup_date", F.to_date("pickup_datetime"))
-    .withColumn("total_amount", F.col("fare_amount") + F.col("tip_amount"))
-    .withColumn("is_rush_hour", 
-                F.when((F.col("pickup_hour").between(7, 9)) | 
-                       (F.col("pickup_hour").between(17, 19)), True)
-                .otherwise(False))
-    .withColumn("event_timestamp", F.current_timestamp())
-)
+def start_continuous_data_generation():
+    """Function to continuously generate and write weather data to source table"""
+    print("Starting continuous data generation...")
+    
+    for batch_num in range(10):  # Generate 10 batches
+        print(f"Generating batch {batch_num + 1}")
+        
+        # Generate new weather data
+        new_data = generate_weather_data_batch(postal_codes, batch_size=50)
+        
+        # Write to bronze table (simulating real API ingestion)
+        new_data.write.mode("append").saveAsTable(source_table)
+        
+        print(f"Written batch {batch_num + 1} to {source_table}")
+        time.sleep(5)  # Wait 5 seconds between batches
+    
+    return "Data generation completed"
 
-# Write initial data to volume
-df_enhanced.write.mode("overwrite").json(f"{volume_path}/source_data/batch_001")
-print(f"Initial data written to {volume_path}/source_data/batch_001")
+# Generate some initial data
+print("Generating initial weather data batch...")
+initial_data = generate_weather_data_batch(postal_codes, batch_size=200)
+initial_data.write.mode("append").saveAsTable(source_table)
+print("Initial data generated successfully!")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Section 1: Basic Streaming with Key Settings
-# MAGIC ### maxBytesPerTrigger and maxFilesPerTrigger
+# MAGIC ### maxBytesPerTrigger and Processing Time - Based on Your Weather Pipeline
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC ### Demonstration of maxBytesPerTrigger
-# MAGIC This controls how much data is processed per trigger to prevent overwhelming the cluster
-
-# Clean up any existing streams
-for stream in spark.streams.active:
-    stream.stop()
-
-# Basic streaming read with maxBytesPerTrigger
 def demo_max_bytes_per_trigger():
-    print("=== Demo: maxBytesPerTrigger ===")
+    """Demonstrate maxBytesPerTrigger using your weather data pipeline"""
+    print("=== Demo: maxBytesPerTrigger with Weather Data ===")
     
-    # Read stream with small maxBytesPerTrigger for demonstration
-    df_stream = (spark
-        .readStream
-        .format("json")
-        .option("maxBytesPerTrigger", "1mb")  # Process only 1MB per trigger
-        .option("multiLine", "true")
-        .load(f"{volume_path}/source_data")
+    # Read from your bronze weather table with controlled batch size
+    stream_df = (spark.readStream
+        .option("readChangeFeed", "true")
+        .option("maxBytesPerTrigger", "1mb")  # Small batches for demo
+        .table(source_table)
     )
     
-    # Simple transformation
-    df_processed = (df_stream
+    # Simple transformation - extract key weather metrics
+    processed_df = (stream_df
+        .select("post_code", "temperature", "probabilityOfPrecipitation", 
+                "startTime", "audit_update_ts")
         .withColumn("processing_time", F.current_timestamp())
-        .select("trip_id", "pickup_zip", "total_amount", "pickup_datetime", "processing_time")
+        .withColumn("temp_category", 
+                   F.when(F.col("temperature") < 32, "freezing")
+                   .when(F.col("temperature") < 60, "cold")
+                   .when(F.col("temperature") < 80, "mild")
+                   .otherwise("hot"))
     )
     
     # Write to console to observe trigger behavior
-    query = (df_processed
+    query = (processed_df
         .writeStream
         .outputMode("append")
         .format("console")
         .option("truncate", False)
         .option("numRows", 10)
-        .trigger(processingTime="10 seconds")  # Trigger every 10 seconds
-        .start()
-    )
-    
-    # Let it run for a bit
-    time.sleep(30)
-    query.stop()
-    
-    return "maxBytesPerTrigger demo completed"
-
-demo_max_bytes_per_trigger()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Demonstration of maxFilesPerTrigger
-# MAGIC This controls how many files are processed per trigger
-
-def demo_max_files_per_trigger():
-    print("=== Demo: maxFilesPerTrigger ===")
-    
-    # First, let's create multiple small files
-    for i in range(10):
-        small_df = generate_taxi_trip_data(1000)
-        small_df.write.mode("overwrite").json(f"{volume_path}/source_data/small_batch_{i:03d}")
-    
-    # Read stream with maxFilesPerTrigger
-    df_stream = (spark
-        .readStream
-        .format("json")
-        .option("maxFilesPerTrigger", "2")  # Process only 2 files per trigger
-        .load(f"{volume_path}/source_data/small_batch_*")
-    )
-    
-    # Add processing metadata
-    df_processed = (df_stream
-        .withColumn("batch_id", F.spark_partition_id())
-        .withColumn("processing_time", F.current_timestamp())
-        .groupBy("batch_id")
-        .agg(
-            F.count("*").alias("record_count"),
-            F.first("processing_time").alias("processed_at")
-        )
-    )
-    
-    query = (df_processed
-        .writeStream
-        .outputMode("complete")
-        .format("console")
         .trigger(processingTime="15 seconds")
         .start()
     )
     
     time.sleep(45)
     query.stop()
-    
-    return "maxFilesPerTrigger demo completed"
+    print("maxBytesPerTrigger demo completed")
 
-demo_max_files_per_trigger()
+demo_max_bytes_per_trigger()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Section 2: Output Modes with Weather Data
+# MAGIC ### Append vs Complete vs Update modes
+
+# COMMAND ----------
+
+def demo_append_mode():
+    """Demonstrate Append mode - most common for streaming"""
+    print("=== Demo: Append Mode with Weather Alerts ===")
+    
+    # Create alerts table
+    spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS leigh_robertson_demo.silver_noaa.weather_alerts (
+        alert_id STRING,
+        post_code STRING,
+        alert_type STRING,
+        temperature INT,
+        precipitation_prob INT,
+        alert_message STRING,
+        created_at TIMESTAMP
+    ) USING DELTA
+    """)
+    
+    stream_df = (spark.readStream
+        .option("readChangeFeed", "true")
+        .option("maxBytesPerTrigger", "2mb")
+        .table(source_table)
+    )
+    
+    # Generate weather alerts using append mode
+    alerts_df = (stream_df
+        .filter((F.col("temperature") < 20) | (F.col("temperature") > 95) |
+                (F.col("probabilityOfPrecipitation.value") > 80))
+        .select("post_code", "temperature", "probabilityOfPrecipitation.value", "startTime")
+        .withColumn("alert_id", F.concat(F.lit("ALERT_"), F.col("post_code"), F.lit("_"), 
+                                        F.unix_timestamp().cast("string")))
+        .withColumn("alert_type", 
+                   F.when(F.col("temperature") < 20, "EXTREME_COLD")
+                   .when(F.col("temperature") > 95, "EXTREME_HEAT")
+                   .otherwise("HIGH_PRECIPITATION"))
+        .withColumn("precipitation_prob", F.col("probabilityOfPrecipitation.value"))
+        .withColumn("alert_message", 
+                   F.concat(F.lit("Weather alert for "), F.col("post_code")))
+        .withColumn("created_at", F.current_timestamp())
+        .drop("probabilityOfPrecipitation.value", "startTime")
+    )
+    
+    query = (alerts_df
+        .writeStream
+        .outputMode("append")
+        .format("delta")
+        .option("checkpointLocation", f"{demo_checkpoint_base}weather_alerts")
+        .table("leigh_robertson_demo.silver_noaa.weather_alerts")
+        .trigger(processingTime="20 seconds")
+        .start()
+    )
+    
+    time.sleep(60)
+    query.stop()
+    print("Append mode demo completed")
+
+demo_append_mode()
+
+# COMMAND ----------
+
+# MAGIC %md  
+# MAGIC ## Section 3: Merge Operations with ForEachBatch
+# MAGIC ### Your existing pattern enhanced with custom logic
+
+# COMMAND ----------
+
+def demo_streaming_merge_enhanced():
+    """Enhanced version of your streaming merge with additional processing"""
+    print("=== Demo: Enhanced Streaming Merge ===")
+    
+    stream_df = (spark.readStream
+        .option("readChangeFeed", "true")
+        .option("maxBytesPerTrigger", "5mb")
+        .table(source_table)
+    )
+    
+    def process_weather_batch(micro_batch_df, batch_id):
+        """Enhanced processing function based on your original"""
+        print(f"Processing batch {batch_id}")
+        
+        # Your original transformation logic enhanced
+        from pyspark.sql.functions import regexp_extract, regexp_replace, when, expr, row_number, desc
+        from pyspark.sql.window import Window
+        
+        micro_batch_df = micro_batch_df.withColumn("batch_id", F.lit(batch_id))
+        
+        transformed_df = (
+            micro_batch_df
+            .withColumn("timezoneOffset", regexp_extract(F.col("startTime"), r"([+-]\d{2}:\d{2})$", 1))
+            .withColumn("startTime", regexp_replace(F.col("startTime"), r"[+-]\d{2}:\d{2}$", ""))
+            .withColumn("endTime", regexp_replace(F.col("endTime"), r"[+-]\d{2}:\d{2}$", ""))
+            .withColumn("windSpeed", regexp_extract(F.col("windSpeed"), "(\\d+)", 1).cast("int"))
+            .withColumn("dewpoint", F.col("dewpoint.value"))
+            .withColumn("probabilityOfPrecipitation", F.col("probabilityOfPrecipitation.value"))
+            .withColumn("relativeHumidity", F.col("relativeHumidity.value"))
+            .withColumn("audit_update_ts", F.current_timestamp())
+        )
+        
+        # Deduplication with window function
+        window_spec = Window.partitionBy("post_code", "startTime").orderBy(
+            desc("audit_update_ts"), desc("batch_id")
+        )
+        
+        deduped_df = (
+            transformed_df
+            .withColumn("row_num", row_number().over(window_spec))
+            .filter(F.col("row_num") == 1)
+            .drop("row_num", "batch_id")
+        )
+        
+        # Enhanced merge with your table
+        delta_table = DeltaTable.forName(spark, silver_table)
+        
+        delta_table.alias("target").merge(
+            deduped_df.alias("source"),
+            "target.post_code = source.post_code AND target.startTime = source.startTime"
+        ).whenMatchedUpdateAll(
+            condition="source.audit_update_ts > target.audit_update_ts"
+        ).whenNotMatchedInsertAll(
+        ).execute()
+        
+        print(f"Processed {deduped_df.count()} records in batch {batch_id}")
+    
+    query = (stream_df
+        .writeStream
+        .foreachBatch(process_weather_batch)
+        .outputMode("update")
+        .option("checkpointLocation", f"{demo_checkpoint_base}enhanced_merge")
+        .trigger(processingTime="30 seconds")
+        .start()
+    )
+    
+    time.sleep(120)
+    query.stop()
+    print("Enhanced merge demo completed")
+
+demo_streaming_merge_enhanced()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Section 4: Stateful vs Stateless Operations
+# MAGIC ### Weather aggregations and windowing
+
+# COMMAND ----------
+
+def demo_stateful_aggregations():
+    """Demonstrate stateful operations with weather data"""
+    print("=== Demo: Stateful Weather Aggregations ===")
+    
+    stream_df = (spark.readStream
+        .option("readChangeFeed", "true")
+        .option("maxBytesPerTrigger", "3mb")
+        .table(source_table)
+    )
+    
+    # Stateful aggregation - rolling weather averages
+    weather_stats = (stream_df
+        .withWatermark("startTime", "2 hours")  # Handle late data
+        .groupBy(
+            F.window(F.to_timestamp(F.col("startTime")), "1 hour", "30 minutes"),
+            "post_code"
+        )
+        .agg(
+            F.avg("temperature").alias("avg_temp"),
+            F.max("temperature").alias("max_temp"),
+            F.min("temperature").alias("min_temp"),
+            F.avg("probabilityOfPrecipitation.value").alias("avg_precipitation"),
+            F.count("*").alias("forecast_count")
+        )
+        .select(
+            F.col("window.start").alias("window_start"),
+            F.col("window.end").alias("window_end"),
+            "post_code", "avg_temp", "max_temp", "min_temp", 
+            "avg_precipitation", "forecast_count"
+        )
+    )
+    
+    query = (weather_stats
+        .writeStream
+        .outputMode("append")  # Can use append with watermark
+        .format("console")
+        .option("truncate", False)
+        .trigger(processingTime="45 seconds")
+        .start()
+    )
+    
+    time.sleep(120)
+    query.stop()
+    print("Stateful aggregations demo completed")
+
+demo_stateful_aggregations()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Section 5: Performance Gotchas and Best Practices
+# MAGIC ### Common issues with weather streaming pipelines
+
+# COMMAND ----------
+
+def demo_performance_gotchas():
+    """Demonstrate common performance issues and solutions"""
+    print("=== Demo: Performance Gotchas ===")
+    
+    # Gotcha 1: Too frequent triggers
+    print("Gotcha 1: Avoid triggers < 1 second")
+    print("Your current setup uses 'availableNow=True' which is good for batch processing")
+    print("For continuous streaming, use processingTime >= 1 second")
+    
+    # Gotcha 2: Data skew demonstration
+    print("Gotcha 2: Data skew by postal code")
+    
+    # Check for skew in your data
+    skew_check = spark.sql(f"""
+        SELECT post_code, COUNT(*) as record_count
+        FROM {source_table}
+        GROUP BY post_code
+        ORDER BY record_count DESC
+        LIMIT 10
+    """)
+    
+    print("Top postal codes by record count (potential skew):")
+    skew_check.display()
+    
+    # Gotcha 3: Missing watermarking
+    print("Gotcha 3: Always use watermarking for time-based operations")
+    print("Your pipeline should include watermarking when doing time-window aggregations")
+    
+    return "Performance gotchas demo completed"
+
+demo_performance_gotchas()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Summary and Best Practices
+
+# COMMAND ----------
+
+print("🌦️  WEATHER DATA STREAMING DEMO COMPLETED")
+print("="*60)
+
+summary = """
+📊 DEMO SECTIONS COVERED (Weather Data Pipeline):
+
+1. ✅ maxBytesPerTrigger with Change Data Feed
+2. ✅ Append Output Mode with Weather Alerts
+3. ✅ Enhanced Merge Operations with ForEachBatch
+4. ✅ Stateful Aggregations with Watermarking
+5. ✅ Performance Gotchas and Skew Detection
+
+🔧 KEY TAKEAWAYS FOR WEATHER PIPELINE:
+- Use Change Data Feed for incremental processing
+- Control batch sizes with maxBytesPerTrigger (1-10MB)
+- Always use watermarking for time-based aggregations  
+- Implement proper deduplication in foreachBatch
+- Monitor for data skew by postal code
+- Use appropriate trigger intervals (≥30 seconds for weather data)
+
+📈 WEATHER-SPECIFIC OPTIMIZATIONS:
+- Partition by post_code for better performance
+- Use time-based windows for weather trends
+- Implement proper timezone handling
+- Handle missing/null weather values gracefully
+
+🚨 COMMON WEATHER STREAMING GOTCHAS:
+- Timezone inconsistencies in startTime/endTime
+- Late-arriving weather updates
+- Data quality issues with nested JSON structures
+- Memory pressure from large probabilityOfPrecipitation objects
+"""
+
+print(summary)
+
+# Clean up active streams
+for stream in spark.streams.active:
+    try:
+        stream.stop()
+        print(f"Stopped stream: {stream.name}")
+    except:
+        pass
+
+print("\n🌦️  Weather Streaming Demo Setup Complete!")
+print("Run the sections above to demonstrate different streaming concepts with your weather data.")
 
 # COMMAND ----------
 
