@@ -2,3 +2,10 @@
 .databricks
 databricks.yml
 settings.json
+
+# Virtual environments
+.venv/
+.venv-databricks/
+*.venv/
+venv/
+env/

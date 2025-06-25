@@ -57,6 +57,38 @@ def generate_weather_data_batch(postal_codes, batch_size=100):
     """Generate simulated weather forecast data for continuous streaming"""
     from pyspark.sql.functions import rand, randn, when
     from datetime import datetime, timedelta
+    from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType, TimestampType, DoubleType
+    
+    # Define explicit schema matching your table structure
+    weather_schema = StructType([
+        StructField("post_code", StringType(), True),
+        StructField("number", LongType(), True),
+        StructField("name", StringType(), True),
+        StructField("startTime", StringType(), True),
+        StructField("endTime", StringType(), True),
+        StructField("isDaytime", BooleanType(), True),
+        StructField("temperature", LongType(), True),
+        StructField("temperatureUnit", StringType(), True),
+        StructField("temperatureTrend", StringType(), True),
+        StructField("probabilityOfPrecipitation", StructType([
+            StructField("unitCode", StringType(), True),
+            StructField("value", LongType(), True)
+        ]), True),
+        StructField("dewpoint", StructType([
+            StructField("unitCode", StringType(), True),
+            StructField("value", DoubleType(), True)
+        ]), True),
+        StructField("relativeHumidity", StructType([
+            StructField("unitCode", StringType(), True),
+            StructField("value", LongType(), True)
+        ]), True),
+        StructField("windSpeed", StringType(), True),
+        StructField("windDirection", StringType(), True),
+        StructField("icon", StringType(), True),
+        StructField("shortForecast", StringType(), True),
+        StructField("detailedForecast", StringType(), True),
+        StructField("audit_update_ts", TimestampType(), True)
+    ])
     
     # Create base data with random weather patterns
     data = []
@@ -68,6 +100,7 @@ def generate_weather_data_batch(postal_codes, batch_size=100):
         temperature = random.randint(-10, 100)
         humidity = random.randint(10, 100)
         precipitation_prob = min(100, max(0, random.randint(0, 100)))
+        dewpoint_value = float(temperature - random.randint(10, 30))
         
         data.append({
             'post_code': str(postal_code),
@@ -79,18 +112,30 @@ def generate_weather_data_batch(postal_codes, batch_size=100):
             'temperature': temperature,
             'temperatureUnit': 'F',
             'temperatureTrend': None,
-            'probabilityOfPrecipitation': {'value': precipitation_prob},
-            'dewpoint': {'value': float(temperature - random.randint(10, 30))},
-            'relativeHumidity': {'value': humidity},
+            'probabilityOfPrecipitation': {
+                'unitCode': 'wmoUnit:percent',
+                'value': precipitation_prob
+            },
+            'dewpoint': {
+                'unitCode': 'wmoUnit:degF', 
+                'value': dewpoint_value
+            },
+            'relativeHumidity': {
+                'unitCode': 'wmoUnit:percent',
+                'value': humidity
+            },
             'windSpeed': f"{random.randint(5, 25)} mph",
             'windDirection': random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']),
             'icon': 'https://api.weather.gov/icons/land/day/clear',
             'shortForecast': random.choice(['Sunny', 'Partly Cloudy', 'Cloudy', 'Rain', 'Snow']),
-            'detailedForecast': f'Temperature around {temperature}°F with {precipitation_prob}% chance of precipitation.'
+            'detailedForecast': f'Temperature around {temperature}°F with {precipitation_prob}% chance of precipitation.',
+            'audit_update_ts': datetime.now()
         })
     
-    df = spark.createDataFrame(data)
-    return df.withColumn('audit_update_ts', F.current_timestamp())
+    # Create DataFrame with explicit schema
+    df = spark.createDataFrame(data, schema=weather_schema)
+    
+    return df
 
 # Get postal codes from your existing data
 postal_codes_df = spark.sql("""
