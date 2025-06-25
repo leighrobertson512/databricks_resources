@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Weather Data Generator for Streaming Demo
 # MAGIC ## Continuous data generation to simulate real-time weather updates
-# MAGIC 
+# MAGIC
 # MAGIC This script generates realistic weather data and writes it to your bronze table
 # MAGIC to provide continuous streaming data for the DSA_SS_Demo.py
 
@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pyspark.sql.functions import current_timestamp, lit
 
 # Configuration - matches your existing setup
-source_table = 'leigh_robertson_demo.bronze_noaa.forecasts'
+source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo'
 
 # COMMAND ----------
 
@@ -91,7 +91,7 @@ print(f"Postal codes: {postal_codes}")
 
 # COMMAND ----------
 
-def start_continuous_generation(duration_minutes=30, batch_interval_seconds=10):
+def start_continuous_generation(duration_minutes=2, batch_interval_seconds=10):
     """
     Start continuous weather data generation
     

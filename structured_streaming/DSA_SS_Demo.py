@@ -32,7 +32,7 @@ from delta.tables import DeltaTable
 
 # Configuration based on your existing setup
 source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo'
-silver_table = "leigh_robertson_demo.silver_noaa.forecasts_ss_streaming_demo"
+silver_table = "leigh_robertson_demo.silver_noaa.forecasts_ss_streaming_demo_expanded"
 demo_checkpoint_base = "s3://one-env/leigh_robertson/streaming_metadata/demo/"
 
 print("Weather Streaming Demo Configuration:")
@@ -43,7 +43,7 @@ print(f"Checkpoint Base: {demo_checkpoint_base}")
 # Clean up any existing streams
 for stream in spark.streams.active:
     print(f"Stopping existing stream: {stream.name}")
-    #stream.stop()
+    #stream.stop()+
 
 # COMMAND ----------
 
@@ -179,45 +179,39 @@ print("Initial data generated successfully!")
 
 # COMMAND ----------
 
-def demo_max_bytes_per_trigger():
-    """Demonstrate maxBytesPerTrigger using your weather data pipeline"""
-    print("=== Demo: maxBytesPerTrigger with Weather Data ===")
-    
-    # Read from your bronze weather table with controlled batch size
-    stream_df = (spark.readStream
+stream_df = (spark.readStream
         .option("readChangeFeed", "true")
-        .option("maxBytesPerTrigger", "1mb")  # Small batches for demo
+        .option("maxBytesPerTrigger", "2mb")
         .table(source_table)
     )
     
-    # Simple transformation - extract key weather metrics
-    processed_df = (stream_df
-        .select("post_code", "temperature", "probabilityOfPrecipitation", 
-                "startTime", "audit_update_ts")
-        .withColumn("processing_time", F.current_timestamp())
-        .withColumn("temp_category", 
-                   F.when(F.col("temperature") < 32, "freezing")
-                   .when(F.col("temperature") < 60, "cold")
-                   .when(F.col("temperature") < 80, "mild")
-                   .otherwise("hot"))
-    )
-    
-    # Write to console to observe trigger behavior
-    query = (processed_df
-        .writeStream
-        .outputMode("append")
-        .format("console")
-        .option("truncate", False)
-        .option("numRows", 10)
-        .trigger(processingTime="15 seconds")
-        .start()
-    )
-    
-    time.sleep(45)
-    query.stop()
-    print("maxBytesPerTrigger demo completed")
+# Generate weather alerts using append mode
+alerts_df = (stream_df
+    .filter((F.col("temperature") < 20) | (F.col("temperature") > 95) |
+            (F.col("probabilityOfPrecipitation.value") > 80))
+    .select("post_code", "temperature", "probabilityOfPrecipitation.value", "startTime")
+    .withColumn("alert_id", F.concat(F.lit("ALERT_"), F.col("post_code"), F.lit("_"), 
+                                    F.unix_timestamp().cast("string")))
+    .withColumn("alert_type", 
+                F.when(F.col("temperature") < 20, "EXTREME_COLD")
+                .when(F.col("temperature") > 95, "EXTREME_HEAT")
+                .otherwise("HIGH_PRECIPITATION"))
+    .withColumn("precipitation_prob", F.col("probabilityOfPrecipitation.value"))
+    .withColumn("alert_message", 
+                F.concat(F.lit("Weather alert for "), F.col("post_code")))
+    .withColumn("created_at", F.current_timestamp())
+    .drop("probabilityOfPrecipitation.value", "startTime")
+)
 
-demo_max_bytes_per_trigger()
+query = (alerts_df
+    .writeStream
+    .outputMode("append")
+    .format("delta")
+    .option("checkpointLocation", f"{demo_checkpoint_base}/weather_alerts")
+    .table("leigh_robertson_demo.silver_noaa.weather_alerts")
+    .trigger(processingTime="20 seconds")
+    .start()
+)
 
 # COMMAND ----------
 
@@ -272,7 +266,7 @@ def demo_append_mode():
         .writeStream
         .outputMode("append")
         .format("delta")
-        .option("checkpointLocation", f"{demo_checkpoint_base}weather_alerts")
+        .option("checkpointLocation", f"{demo_checkpoint_base}/weather_alerts")
         .table("leigh_robertson_demo.silver_noaa.weather_alerts")
         .trigger(processingTime="20 seconds")
         .start()
