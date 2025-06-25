@@ -50,92 +50,11 @@ for stream in spark.streams.active:
 # MAGIC %md
 # MAGIC ## Data Generation for Continuous Streaming
 # MAGIC Creating a continuous data generator to simulate real-time weather data updates
+# MAGIC 
+# MAGIC **Note: The main data generation functions have been moved to Weather_Data_Generator.py**
+# MAGIC **Run that notebook to generate continuous streaming data for this demo**
 
 # COMMAND ----------
-
-def generate_weather_data_batch(postal_codes, batch_size=100):
-    """Generate simulated weather forecast data for continuous streaming"""
-    from pyspark.sql.functions import rand, randn, when
-    from datetime import datetime, timedelta
-    from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType, TimestampType, DoubleType
-    
-    # Define explicit schema matching your table structure
-    weather_schema = StructType([
-        StructField("post_code", StringType(), True),
-        StructField("number", LongType(), True),
-        StructField("name", StringType(), True),
-        StructField("startTime", StringType(), True),
-        StructField("endTime", StringType(), True),
-        StructField("isDaytime", BooleanType(), True),
-        StructField("temperature", LongType(), True),
-        StructField("temperatureUnit", StringType(), True),
-        StructField("temperatureTrend", StringType(), True),
-        StructField("probabilityOfPrecipitation", StructType([
-            StructField("unitCode", StringType(), True),
-            StructField("value", LongType(), True)
-        ]), True),
-        StructField("dewpoint", StructType([
-            StructField("unitCode", StringType(), True),
-            StructField("value", DoubleType(), True)
-        ]), True),
-        StructField("relativeHumidity", StructType([
-            StructField("unitCode", StringType(), True),
-            StructField("value", LongType(), True)
-        ]), True),
-        StructField("windSpeed", StringType(), True),
-        StructField("windDirection", StringType(), True),
-        StructField("icon", StringType(), True),
-        StructField("shortForecast", StringType(), True),
-        StructField("detailedForecast", StringType(), True),
-        StructField("audit_update_ts", TimestampType(), True)
-    ])
-    
-    # Create base data with random weather patterns
-    data = []
-    for i in range(batch_size):
-        postal_code = random.choice(postal_codes)
-        base_time = datetime.now() + timedelta(hours=random.randint(0, 168))  # Next 7 days
-        
-        # Simulate realistic weather patterns
-        temperature = random.randint(-10, 100)
-        humidity = random.randint(10, 100)
-        precipitation_prob = min(100, max(0, random.randint(0, 100)))
-        dewpoint_value = float(temperature - random.randint(10, 30))
-        
-        data.append({
-            'post_code': str(postal_code),
-            'number': i,
-            'name': f'Weather Forecast {i}',
-            'startTime': base_time.strftime('%Y-%m-%dT%H:%M:%S-05:00'),
-            'endTime': (base_time + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S-05:00'),
-            'isDaytime': base_time.hour >= 6 and base_time.hour <= 18,
-            'temperature': temperature,
-            'temperatureUnit': 'F',
-            'temperatureTrend': None,
-            'probabilityOfPrecipitation': {
-                'unitCode': 'wmoUnit:percent',
-                'value': precipitation_prob
-            },
-            'dewpoint': {
-                'unitCode': 'wmoUnit:degF', 
-                'value': dewpoint_value
-            },
-            'relativeHumidity': {
-                'unitCode': 'wmoUnit:percent',
-                'value': humidity
-            },
-            'windSpeed': f"{random.randint(5, 25)} mph",
-            'windDirection': random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']),
-            'icon': 'https://api.weather.gov/icons/land/day/clear',
-            'shortForecast': random.choice(['Sunny', 'Partly Cloudy', 'Cloudy', 'Rain', 'Snow']),
-            'detailedForecast': f'Temperature around {temperature}°F with {precipitation_prob}% chance of precipitation.',
-            'audit_update_ts': datetime.now()
-        })
-    
-    # Create DataFrame with explicit schema
-    df = spark.createDataFrame(data, schema=weather_schema)
-    
-    return df
 
 # Get postal codes from your existing data
 postal_codes_df = spark.sql("""
@@ -147,29 +66,9 @@ postal_codes_df = spark.sql("""
 postal_codes = [row.post_code for row in postal_codes_df.collect()]
 print(f"Using {len(postal_codes)} postal codes for demo: {postal_codes[:5]}...")
 
-def start_continuous_data_generation():
-    """Function to continuously generate and write weather data to source table"""
-    print("Starting continuous data generation...")
-    
-    for batch_num in range(10):  # Generate 10 batches
-        print(f"Generating batch {batch_num + 1}")
-        
-        # Generate new weather data
-        new_data = generate_weather_data_batch(postal_codes, batch_size=50)
-        
-        # Write to bronze table (simulating real API ingestion)
-        new_data.write.mode("append").saveAsTable(source_table)
-        
-        print(f"Written batch {batch_num + 1} to {source_table}")
-        time.sleep(5)  # Wait 5 seconds between batches
-    
-    return "Data generation completed"
-
-# Generate some initial data
-print("Generating initial weather data batch...")
-initial_data = generate_weather_data_batch(postal_codes, batch_size=200)
-initial_data.write.mode("append").saveAsTable(source_table)
-print("Initial data generated successfully!")
+# Note: For continuous data generation, run the Weather_Data_Generator.py notebook
+print("💡 For continuous data generation, run the Weather_Data_Generator.py notebook")
+print("💡 All data generation functions are now centralized there with the working schema")
 
 # COMMAND ----------
 
