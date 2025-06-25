@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # Weather Data Structured Streaming Demo
 # MAGIC ## Solutions Architect Demo: Common Patterns, Issues, and Best Practices
-# MAGIC 
+# MAGIC
 # MAGIC **Based on NOAA Weather Data Pipeline**
-# MAGIC 
+# MAGIC
 # MAGIC This demo covers:
 # MAGIC - **Common Issues**: Skew, Spill, Shuffle
 # MAGIC - **Key Settings**: maxBytesPerTrigger, maxFilesPerTrigger, ProcessingTime
@@ -31,8 +31,8 @@ from pyspark.sql.streaming import StreamingQuery
 from delta.tables import DeltaTable
 
 # Configuration based on your existing setup
-source_table = 'leigh_robertson_demo.bronze_noaa.forecasts'
-silver_table = "leigh_robertson_demo.silver_noaa.forecasts_ss"
+source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo'
+silver_table = "leigh_robertson_demo.silver_noaa.forecasts_ss_streaming_demo"
 demo_checkpoint_base = "s3://one-env/leigh_robertson/streaming_metadata/demo/"
 
 print("Weather Streaming Demo Configuration:")
@@ -43,7 +43,7 @@ print(f"Checkpoint Base: {demo_checkpoint_base}")
 # Clean up any existing streams
 for stream in spark.streams.active:
     print(f"Stopping existing stream: {stream.name}")
-    stream.stop()
+    #stream.stop()
 
 # COMMAND ----------
 
@@ -97,7 +97,7 @@ postal_codes_df = spark.sql("""
     SELECT DISTINCT post_code 
     FROM leigh_robertson_demo.bronze_noaa.zip_code 
     WHERE state_abbreviation = 'NY'
-    LIMIT 20
+    LIMIT 1000
 """)
 postal_codes = [row.post_code for row in postal_codes_df.collect()]
 print(f"Using {len(postal_codes)} postal codes for demo: {postal_codes[:5]}...")
