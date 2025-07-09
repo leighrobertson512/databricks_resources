@@ -50,7 +50,7 @@ for stream in spark.streams.active:
 # MAGIC %md
 # MAGIC ## Data Generation for Continuous Streaming
 # MAGIC Creating a continuous data generator to simulate real-time weather data updates
-# MAGIC 
+# MAGIC
 # MAGIC **Note: The main data generation functions have been moved to Weather_Data_Generator.py**
 # MAGIC **Run that notebook to generate continuous streaming data for this demo**
 
@@ -75,42 +75,6 @@ print("💡 All data generation functions are now centralized there with the wor
 # MAGIC %md
 # MAGIC ## Section 1: Basic Streaming with Key Settings
 # MAGIC ### maxBytesPerTrigger and Processing Time - Based on Your Weather Pipeline
-
-# COMMAND ----------
-
-stream_df = (spark.readStream
-        .option("readChangeFeed", "true")
-        .option("maxBytesPerTrigger", "2mb")
-        .table(source_table)
-    )
-    
-# Generate weather alerts using append mode
-alerts_df = (stream_df
-    .filter((F.col("temperature") < 20) | (F.col("temperature") > 95) |
-            (F.col("probabilityOfPrecipitation.value") > 80))
-    .select("post_code", "temperature", "probabilityOfPrecipitation.value", "startTime")
-    .withColumn("alert_id", F.concat(F.lit("ALERT_"), F.col("post_code"), F.lit("_"), 
-                                    F.unix_timestamp().cast("string")))
-    .withColumn("alert_type", 
-                F.when(F.col("temperature") < 20, "EXTREME_COLD")
-                .when(F.col("temperature") > 95, "EXTREME_HEAT")
-                .otherwise("HIGH_PRECIPITATION"))
-    .withColumn("precipitation_prob", F.col("probabilityOfPrecipitation.value"))
-    .withColumn("alert_message", 
-                F.concat(F.lit("Weather alert for "), F.col("post_code")))
-    .withColumn("created_at", F.current_timestamp())
-    .drop("probabilityOfPrecipitation.value", "startTime")
-)
-
-query = (alerts_df
-    .writeStream
-    .outputMode("append")
-    .format("delta")
-    .option("checkpointLocation", f"{demo_checkpoint_base}/weather_alerts")
-    .table("leigh_robertson_demo.silver_noaa.weather_alerts")
-    .trigger(processingTime="20 seconds")
-    .start()
-)
 
 # COMMAND ----------
 

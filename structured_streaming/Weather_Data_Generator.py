@@ -167,7 +167,7 @@ def start_continuous_generation(duration_minutes=2, batch_interval_seconds=10):
         
         try:
             # Generate weather data with some variability
-            batch_size = random.randint(20, 50)  # Variable batch sizes
+            batch_size = random.randint(1000, 5000)  # Variable batch sizes
             new_data = generate_weather_data_batch(postal_codes, batch_size, advanced_patterns=True)
             
             # Write to bronze table
@@ -200,6 +200,12 @@ def generate_burst_data(num_batches=5, batch_size=100):
         time.sleep(2)  # Short delay between burst batches
     
     print("Burst generation completed!")
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC SELECT count(1)
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo
 
 # COMMAND ----------
 
@@ -329,7 +335,7 @@ print("✅ Initial batch generated")
 # COMMAND ----------
 
 # Example 2: Generate continuous data (uncomment to run)
-# start_continuous_generation(duration_minutes=15, batch_interval_seconds=5)
+start_continuous_generation(duration_minutes=3, batch_interval_seconds=5)
 
 # COMMAND ----------
 
