@@ -42,41 +42,25 @@ def process_microbatch(micro_batch_df, batch_id):
         .withColumn("dewpoint", col("dewpoint.value"))
         .withColumn("probabilityOfPrecipitation", col("probabilityOfPrecipitation.value"))
         .withColumn("relativeHumidity", col("relativeHumidity.value"))
+        .drop("batch_id")  # Remove batch_id before writing
     )
 
-    # Add window function to get latest record
-    window_spec = Window.partitionBy("post_code", "startTime").orderBy(
-        desc("audit_update_ts"), 
-        desc("batch_id")  # Tiebreaker for same timestamp
-    )
-    
-    deduped_df = (
-        transformed_df
-        .withColumn("row_num", row_number().over(window_spec))
-        .filter(col("row_num") == 1)
-        .drop("row_num", "batch_id")
-    )
-
-    # Merge with target table
-    delta_table = DeltaTable.forName(spark, target_table)
-    
-    delta_table.alias("target").merge(
-        deduped_df.alias("source"),
-        "target.post_code = source.post_code AND target.startTime = source.startTime"
-    ).whenMatchedUpdateAll(
-        condition="source.audit_update_ts > target.audit_update_ts"
-    ).whenNotMatchedInsertAll(
-    ).execute()
+    # Append transformed data to target table
+    transformed_df.write \
+        .format("delta") \
+        .mode("append") \
+        .saveAsTable(target_table)
 
 
 # COMMAND ----------
 
-# Start the streaming query
+# Start the streaming query with microbatch processing
 checkpoint_location = "s3://one-env/leigh_robertson/streaming_metadata/forecasts_streaming_demo_expanded/"
 target_table = "leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded"
+
 query = stream_df.writeStream \
     .foreachBatch(process_microbatch) \
-    .outputMode("update") \
+    .outputMode("append") \
     .queryName("forecasts_streaming_demo_expanded") \
     .trigger(processingTime="1 minute") \
     .option("checkpointLocation", checkpoint_location) \
