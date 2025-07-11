@@ -1,4 +1,11 @@
 # Databricks notebook source
+"""
+Here is what I plan to cover:
+- 
+"""
+
+# COMMAND ----------
+
 spark.conf.set("spark.sql.files.ignoreMissingFiles", "true")
 
 # COMMAND ----------
@@ -10,7 +17,7 @@ source_table = source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_stream
 
 stream_df = (spark.readStream
     #.option("readChangeFeed", "true")
-    .option("maxBytesPerTrigger", "10g")
+    .option("maxBytesPerTrigger", "100k")
     .table(source_table)
 )
 
@@ -55,6 +62,7 @@ def process_microbatch(micro_batch_df, batch_id):
 # COMMAND ----------
 
 # Start the streaming query with microbatch processing
+import time
 checkpoint_location = "s3://one-env/leigh_robertson/streaming_metadata/forecasts_streaming_demo_expanded/"
 target_table = "leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded"
 
@@ -62,12 +70,25 @@ query = stream_df.writeStream \
     .foreachBatch(process_microbatch) \
     .outputMode("append") \
     .queryName("forecasts_streaming_demo_expanded") \
-    .trigger(processingTime="1 minute") \
+    .trigger(processingTime="30 seconds") \
     .option("checkpointLocation", checkpoint_location) \
     .start()
 
 # Wait for the query to terminate
 #query.awaitTermination()
+#.trigger("availableNow" = True) \
+    
+# Let the query run for 10 minutes (600 seconds)
+# time.sleep(600)
+
+# # Stop the streaming query
+# query.stop()
+
+# COMMAND ----------
+
+# dbutils.fs.rm(checkpoint_location, recurse=True)
+# spark.sql("TRUNCATE TABLE leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded;")
+
 
 # COMMAND ----------
 
@@ -102,5 +123,8 @@ query = stream_df.writeStream \
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC SELECT *
-# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_ss
+# MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo
+
+# COMMAND ----------
+
+
