@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timedelta
 from pyspark.sql.functions import current_timestamp, lit
 from pyspark.sql.types import StructType, StructField, StringType, LongType, BooleanType, TimestampType, DoubleType
+import json
 
 # Configuration - matches your existing setup
 source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo'
@@ -127,6 +128,115 @@ def generate_weather_data_batch(postal_codes, batch_size=100, advanced_patterns=
 
 # COMMAND ----------
 
+def generate_single_weather_record(record_index, postal_codes, advanced_patterns=False):
+    """Generate a single weather record as JSON string for RDD processing"""
+    import random
+    from datetime import datetime, timedelta
+    
+    postal_code = random.choice(postal_codes)
+    base_time = datetime.now() + timedelta(hours=random.randint(0, 168))  # Next 7 days
+    
+    # Simulate realistic weather patterns
+    temperature = random.randint(-10, 100)
+    humidity = random.randint(10, 100)
+    precipitation_prob = min(100, max(0, random.randint(0, 100)))
+    dewpoint_value = float(temperature - random.randint(10, 30))
+    
+    # Advanced weather patterns if requested
+    if advanced_patterns:
+        # Seasonal adjustments
+        month = base_time.month
+        if month in [12, 1, 2]:  # Winter
+            temperature = random.randint(-20, 40)
+            precipitation_prob = random.randint(10, 70)
+        elif month in [6, 7, 8]:  # Summer
+            temperature = random.randint(60, 100)
+            precipitation_prob = random.randint(5, 40)
+        
+        # Weather condition correlation
+        if precipitation_prob > 70:
+            short_forecast = random.choice(['Rain', 'Thunderstorms', 'Snow'])
+            humidity = max(humidity, 60)
+        elif precipitation_prob < 20:
+            short_forecast = 'Sunny'
+            humidity = min(humidity, 50)
+        else:
+            short_forecast = random.choice(['Partly Cloudy', 'Cloudy'])
+    else:
+        short_forecast = random.choice(['Sunny', 'Partly Cloudy', 'Cloudy', 'Rain', 'Snow'])
+    
+    weather_record = {
+        'post_code': str(postal_code),
+        'number': record_index,
+        'name': f'Weather Forecast {record_index}',
+        'startTime': base_time.strftime('%Y-%m-%dT%H:%M:%S-05:00'),
+        'endTime': (base_time + timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%S-05:00'),
+        'isDaytime': base_time.hour >= 6 and base_time.hour <= 18,
+        'temperature': temperature,
+        'temperatureUnit': 'F',
+        'temperatureTrend': random.choice([None, 'rising', 'falling']),
+        'probabilityOfPrecipitation': {
+            'unitCode': 'wmoUnit:percent',
+            'value': precipitation_prob
+        },
+        'dewpoint': {
+            'unitCode': 'wmoUnit:degF', 
+            'value': dewpoint_value
+        },
+        'relativeHumidity': {
+            'unitCode': 'wmoUnit:percent',
+            'value': humidity
+        },
+        'windSpeed': f"{random.randint(5, 25)} mph",
+        'windDirection': random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']),
+        'icon': 'https://api.weather.gov/icons/land/day/clear',
+        'shortForecast': short_forecast,
+        'detailedForecast': f'Temperature around {temperature}°F with {precipitation_prob}% chance of precipitation.',
+        'audit_update_ts': datetime.now().isoformat()
+    }
+    
+    return json.dumps(weather_record)
+
+def generate_weather_data_batch_rdd(postal_codes, batch_size=100, advanced_patterns=False):
+    """Generate weather data using RDD for distributed processing across driver and worker nodes"""
+    
+    # Create RDD with distributed processing - similar to the original RDD example
+    # This distributes the work across multiple partitions (worker nodes)
+    num_partitions = min(100, batch_size // 10)  # Reasonable partition count
+    
+    weather_rdd = sc.parallelize(range(batch_size), num_partitions).map(
+        lambda x: generate_single_weather_record(x, postal_codes, advanced_patterns)
+    )
+    
+    # Convert RDD to DataFrame using spark.read.json (same pattern as original)
+    weather_df = spark.read.json(weather_rdd)
+    
+    # Ensure the DataFrame has the correct schema and data types
+    weather_df = weather_df.select(
+        weather_df.post_code.cast("string"),
+        weather_df.number.cast("long"),
+        weather_df.name.cast("string"),
+        weather_df.startTime.cast("string"),
+        weather_df.endTime.cast("string"),
+        weather_df.isDaytime.cast("boolean"),
+        weather_df.temperature.cast("long"),
+        weather_df.temperatureUnit.cast("string"),
+        weather_df.temperatureTrend.cast("string"),
+        weather_df.probabilityOfPrecipitation,
+        weather_df.dewpoint,
+        weather_df.relativeHumidity,
+        weather_df.windSpeed.cast("string"),
+        weather_df.windDirection.cast("string"),
+        weather_df.icon.cast("string"),
+        weather_df.shortForecast.cast("string"),
+        weather_df.detailedForecast.cast("string"),
+        weather_df.audit_update_ts.cast("timestamp")
+    )
+    
+    return weather_df
+
+# COMMAND ----------
+
 # Get postal codes from your existing data
 postal_codes_df = spark.sql("""
     SELECT DISTINCT post_code 
@@ -186,6 +296,46 @@ def start_continuous_generation(duration_minutes=2, batch_interval_seconds=10):
 
 # COMMAND ----------
 
+def start_continuous_generation_rdd(duration_minutes=2, batch_interval_seconds=10):
+    """
+    Start continuous weather data generation using RDD for distributed processing
+    
+    Args:
+        duration_minutes: How long to run the generator
+        batch_interval_seconds: Seconds between batches
+    """
+    print(f"Starting RDD-based continuous weather data generation for {duration_minutes} minutes")
+    print(f"Batch interval: {batch_interval_seconds} seconds")
+    
+    start_time = time.time()
+    end_time = start_time + (duration_minutes * 60)
+    batch_num = 0
+    
+    while time.time() < end_time:
+        batch_num += 1
+        print(f"\n--- Generating RDD Batch {batch_num} ---")
+        
+        try:
+            # Generate weather data with some variability using RDD
+            batch_size = random.randint(100000, 10000000)  # Variable batch sizes
+            new_data = generate_weather_data_batch_rdd(postal_codes, batch_size, advanced_patterns=True)
+            
+            # Write to bronze table
+            new_data.write.mode("append").saveAsTable(source_table)
+            
+            print(f"✅ RDD Batch {batch_num}: {batch_size} records written to {source_table}")
+            
+            # Wait before next batch
+            time.sleep(batch_interval_seconds)
+            
+        except Exception as e:
+            print(f"❌ Error in RDD batch {batch_num}: {e}")
+            time.sleep(5)  # Short delay on error
+    
+    print(f"\n🏁 RDD-based continuous generation completed. Generated {batch_num} batches.")
+
+# COMMAND ----------
+
 def generate_burst_data(num_batches=5, batch_size=100):
     """Generate burst of data for testing streaming performance"""
     print(f"Generating burst of {num_batches} batches with {batch_size} records each")
@@ -200,6 +350,23 @@ def generate_burst_data(num_batches=5, batch_size=100):
         time.sleep(2)  # Short delay between burst batches
     
     print("Burst generation completed!")
+
+# COMMAND ----------
+
+def generate_burst_data_rdd(num_batches=5, batch_size=100):
+    """Generate burst of data using RDD for testing streaming performance"""
+    print(f"Generating RDD burst of {num_batches} batches with {batch_size} records each")
+    
+    for i in range(num_batches):
+        print(f"RDD Burst batch {i+1}/{num_batches}")
+        
+        # Generate and write data using the RDD function
+        burst_data = generate_weather_data_batch_rdd(postal_codes, batch_size, advanced_patterns=True)
+        burst_data.write.mode("append").saveAsTable(source_table)
+        
+        time.sleep(2)  # Short delay between burst batches
+    
+    print("RDD Burst generation completed!")
 
 # COMMAND ----------
 
