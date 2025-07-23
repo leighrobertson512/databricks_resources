@@ -277,7 +277,7 @@ def start_continuous_generation(duration_minutes=2, batch_interval_seconds=10):
         
         try:
             # Generate weather data with some variability
-            batch_size = random.randint(100000, 10000000)  # Variable batch sizes
+            batch_size = random.randint(10000, 1000000)  # Variable batch sizes
             new_data = generate_weather_data_batch(postal_codes, batch_size, advanced_patterns=True)
             
             # Write to bronze table
@@ -317,7 +317,7 @@ def start_continuous_generation_rdd(duration_minutes=2, batch_interval_seconds=1
         
         try:
             # Generate weather data with some variability using RDD
-            batch_size = random.randint(100000, 10000000)  # Variable batch sizes
+            batch_size = random.randint(10000, 1000000)  # Variable batch sizes
             new_data = generate_weather_data_batch_rdd(postal_codes, batch_size, advanced_patterns=True)
             
             # Write to bronze table
@@ -497,6 +497,7 @@ def generate_extreme_weather_data(num_records=200):
 
 # Example 2: Generate continuous data (uncomment to run)
 start_continuous_generation(duration_minutes=10, batch_interval_seconds=3)
+#start_continuous_generation_rdd(duration_minutes=2, batch_interval_seconds=3)
 
 # COMMAND ----------
 

@@ -1,12 +1,28 @@
 # Databricks notebook source
 """
 Here is what I plan to cover:
-- 
+- RTM vs standard SS 
+- maxBytesPerTrigger/ maxFilesPerTrigger (rate limiting)
+- microbatch 
+- append vs merge 
+- processingTime variable and implications of setting too low
+- speed 
+  - spark things to look for
+  - Code changes 
+
+Spark UI 
+- features to dig into here metrics you can see while running vs after it has been sent
+  - can see while running 
+  - input vs processing rate
+
+Framework I walk through to determine what should be changed aka, what is the bottleneck
+- ensure microbatch, maxBytesPerTrigger, output etc is captured
+- input vs output rate
+  - if input is not too high but processing rate is super low 
+- Ask about use of UDFs
+- Spark UI to figuring 
+
 """
-
-# COMMAND ----------
-
-spark.conf.set("spark.sql.files.ignoreMissingFiles", "true")
 
 # COMMAND ----------
 
@@ -70,7 +86,7 @@ query = stream_df.writeStream \
     .foreachBatch(process_microbatch) \
     .outputMode("append") \
     .queryName("forecasts_streaming_demo_expanded") \
-    .trigger(processingTime="30 seconds") \
+    .trigger(processingTime="90 seconds") \
     .option("checkpointLocation", checkpoint_location) \
     .start()
 
@@ -78,11 +94,11 @@ query = stream_df.writeStream \
 #query.awaitTermination()
 #.trigger("availableNow" = True) \
     
-# Let the query run for 10 minutes (600 seconds)
-# time.sleep(600)
+#Let the query run for 10 minutes (600 seconds)
+#time.sleep(900)
 
-# # Stop the streaming query
-# query.stop()
+# Stop the streaming query
+#query.stop()
 
 # COMMAND ----------
 
@@ -127,4 +143,28 @@ query = stream_df.writeStream \
 
 # COMMAND ----------
 
+active_queries = spark.streams.active
+for query in active_queries:
+    if query.name == "forecasts_streaming_demo_expanded":
+        display(query)
+        #break
+
+# COMMAND ----------
+
+# Get active query by name
+active_query = spark.streams.active
+for query in active_query:
+    if query.name == "forecasts_streaming_demo_expanded":
+        # Access metrics
+        status = query.status
+        recent_progress = query.recentProgress
+        last_progress = query.lastProgress
+        
+        print(f"Query: {query.name}")
+        print(f"Status: {status}")
+        print(f"Recent metrics: {recent_progress}")
+
+# COMMAND ----------
+
+Input:
 
