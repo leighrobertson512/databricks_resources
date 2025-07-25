@@ -9,3 +9,6 @@ settings.json
 *.venv/
 venv/
 env/
+
+# Archived frameworks - not tracked in repo
+archived_frameworks/
