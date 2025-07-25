@@ -59,25 +59,23 @@ Get your weather data pipeline running in 5 minutes with Lakehouse Plumber!
 
 3. **Monitor in Databricks**:
    - Go to DLT Pipelines in your Databricks workspace
-   - Look for `weather_silver_pipeline_dev` and `weather_gold_pipeline_dev`
-   - Start the pipelines to process your streaming data
+   - Look for `weather_data_pipeline_dev`
+   - Start the pipeline to process your streaming data through Bronze → Silver → Gold layers
 
 ## 📁 Generated Files Structure
 
 ```
 generated/
-├── silver_weather_transform/
-│   └── main.py                    # Silver layer DLT code
-├── gold_daily_weather_aggregates/
-│   └── main.py                    # Gold layer DLT code
+├── weather_data_pipeline/
+│   └── weather_data_processing.py # Combined Bronze → Silver → Gold DLT code
 └── bundles/
     └── databricks.yml             # Asset bundle configuration
 ```
 
 ## 🔧 Customization
 
-### Modify Aggregation Logic
-Edit `pipelines/gold_daily_weather_aggregates.yaml` and regenerate:
+### Modify Pipeline Logic
+Edit `pipelines/weather_data_pipeline_combined.yaml` and regenerate:
 
 ```bash
 lhp generate --env dev --cleanup

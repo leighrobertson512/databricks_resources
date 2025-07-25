@@ -1,30 +1,17 @@
 {
   "environments": {
     "dev": {
-      "generated/gold_daily_weather_aggregates/weather_analytics.py": {
-        "checksum": "878ca118ee033b17c719eb3e6c47f5c7b538bfe33d3ee04c1d59b6d3b9be650c",
+      "generated/weather_data_pipeline/weather_data_processing.py": {
+        "checksum": "b9d52286bcda78a808e5c5639891a03bae96e3e711607248cada0a3a1433e0cb",
         "environment": "dev",
-        "file_composite_checksum": "95db7322eb52b6b6381fc0c5d9f53b09be32f703b6ac4022ef7d233b804ea1c6",
+        "file_composite_checksum": "8a1613b5ee41a756eb095539bc65811298b9e58ada02c361e896156d29ea8b06",
         "file_dependencies": {
           "presets/gold_layer.yaml": {
             "checksum": "4d8367fc3ca63e8df09bda15a83568cd0011e33e4abba0e0c9e4522a3069259a",
             "last_modified": "2025-07-25T16:05:35.274701",
             "path": "presets/gold_layer.yaml",
             "type": "preset"
-          }
-        },
-        "flowgroup": "weather_analytics",
-        "generated_path": "generated/gold_daily_weather_aggregates/weather_analytics.py",
-        "pipeline": "gold_daily_weather_aggregates",
-        "source_yaml": "pipelines/gold_daily_weather_aggregates.yaml",
-        "source_yaml_checksum": "7de8bd6e5fa50301b8bec0eab0e80ed283f9dc4b7674d471e96bb95a2eeead1b",
-        "timestamp": "2025-07-25T16:08:07.188003"
-      },
-      "generated/silver_weather_transform/weather_data_cleansing.py": {
-        "checksum": "bc89331f21f181f4c8d26c4b26d1c0f7429cb8e9b2611b9012b60453a37ba347",
-        "environment": "dev",
-        "file_composite_checksum": "a59f10b626779338fc3a28fef3f30ad1c047403c168e7a0202371efed84c6570",
-        "file_dependencies": {
+          },
           "presets/silver_layer.yaml": {
             "checksum": "5edb9535d2a5df55a4a0c45f899ed4252c45f6a46b9a8255451ada7eca03ac83",
             "last_modified": "2025-07-25T16:05:29.443877",
@@ -32,12 +19,12 @@
             "type": "preset"
           }
         },
-        "flowgroup": "weather_data_cleansing",
-        "generated_path": "generated/silver_weather_transform/weather_data_cleansing.py",
-        "pipeline": "silver_weather_transform",
-        "source_yaml": "pipelines/silver_weather_transform.yaml",
-        "source_yaml_checksum": "1dfd30298e01c9e47fbab820937ea0db1376f48083ecfaeb183825b204f98ad7",
-        "timestamp": "2025-07-25T16:08:07.227514"
+        "flowgroup": "weather_data_processing",
+        "generated_path": "generated/weather_data_pipeline/weather_data_processing.py",
+        "pipeline": "weather_data_pipeline",
+        "source_yaml": "pipelines/weather_data_pipeline_combined.yaml",
+        "source_yaml_checksum": "5a198302ae5d10f67fd70468153b8ec9e60328f5291bdd9bd40561c74b0decca",
+        "timestamp": "2025-07-25T16:24:21.917638"
       }
     }
   },
@@ -57,6 +44,6 @@
       }
     }
   },
-  "last_updated": "2025-07-25T16:08:07.228020",
+  "last_updated": "2025-07-25T16:24:21.918345",
   "version": "1.0"
 }

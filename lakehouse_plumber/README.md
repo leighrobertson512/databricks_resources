@@ -45,28 +45,25 @@ lakehouse_plumber/
 │   ├── silver_layer.yaml            #   Silver layer standards
 │   └── gold_layer.yaml              #   Gold layer standards
 ├── pipelines/                        # Pipeline definitions
-│   ├── silver_weather_transform.yaml #   Bronze → Silver transformation
-│   └── gold_daily_weather_aggregates.yaml  # Silver → Gold aggregation
+│   └── weather_data_pipeline_combined.yaml  # Combined Bronze → Silver → Gold pipeline
 └── generated/                        # Auto-generated Python code (created by LHP)
 ```
 
 ## Pipeline Details
 
-### Silver Layer Pipeline (`silver_weather_transform.yaml`)
+### Combined Weather Data Pipeline (`weather_data_pipeline_combined.yaml`)
 
-**Transformations:**
-- Extracts timezone information from timestamps
-- Converts timestamps to UTC
+**Complete Bronze → Silver → Gold flow in a single DLT pipeline:**
+
+#### Silver Layer Transformations:
+- Loads bronze weather data with CDC (Change Data Capture)
+- Extracts timezone information from timestamps and converts to UTC
 - Flattens nested JSON structures (dewpoint, precipitation, humidity)
 - Extracts numeric wind speed from string values
 - Implements SCD Type 1 for weather forecast updates
 - Data quality validations (temperature range, humidity bounds)
 
-**Output**: `{catalog}.{silver_schema}.weather_forecasts`
-
-### Gold Layer Pipeline (`gold_daily_weather_aggregates.yaml`)
-
-**Features:**
+#### Gold Layer Aggregations:
 - Daily aggregations with **one-day lag** for analytics stability
 - Temperature statistics (min, max, avg) by postal code and date
 - Weather condition analysis (sunny, rainy, cloudy, snow percentages)
@@ -75,8 +72,9 @@ lakehouse_plumber/
 - Materialized view with scheduled daily refresh (2 AM)
 
 **Outputs:**
-- `{catalog}.{gold_schema}.daily_weather_metrics` (Materialized View)
-- `{catalog}.{gold_schema}.regional_weather_summary` (Streaming Table)
+- `{catalog}.{silver_schema}.weather_forecasts` (Silver Streaming Table)
+- `{catalog}.{gold_schema}.daily_weather_metrics` (Gold Materialized View)
+- `{catalog}.{gold_schema}.regional_weather_summary` (Gold Streaming Table)
 
 ## Usage
 
