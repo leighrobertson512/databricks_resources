@@ -1,0 +1,20 @@
+# Development environment configuration
+catalog: "leigh_robertson_demo"
+bronze_schema: "bronze_noaa"
+silver_schema: "silver_noaa"
+gold_schema: "gold_noaa"
+
+# Source tables
+bronze_forecasts_table: "forecasts_streaming_demo"
+
+# Streaming configuration
+max_bytes_per_trigger: "10g"
+checkpoint_location_base: "/tmp/checkpoints/weather_pipeline"
+
+# Table properties
+table_properties:
+  quality: "silver"
+  environment: "development"
+  
+# Data retention
+retention_days: 30 

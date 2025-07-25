@@ -1,0 +1,140 @@
+pipeline: "gold_daily_weather_aggregates"
+flowgroup: "weather_analytics"
+description: "Daily weather aggregations with one-day lag for analytics"
+
+# Use gold layer preset
+presets: ["gold_layer"]
+
+actions:
+  # Step 1: Load silver weather data
+  - name: "load_silver_weather_data"
+    type: "load"
+    source:
+      type: "delta"
+      database: "{{ catalog }}.{{ silver_schema }}"
+      table: "weather_forecasts"
+    target: "v_silver_weather_source"
+    description: "Load silver weather forecasts data"
+    
+  # Step 2: Create view for daily aggregations with one-day lag
+  - name: "create_daily_weather_view"
+    type: "transform"
+    transform_type: "sql"
+    source: "v_silver_weather_source"
+    target: "v_daily_weather_aggregates"
+    sql: |
+      SELECT 
+        post_code,
+        date(start_time_utc) as forecast_date,
+        
+        -- Temperature aggregations
+        min(temperature) as min_temperature,
+        max(temperature) as max_temperature,
+        avg(temperature) as avg_temperature,
+        
+        -- Humidity and precipitation aggregations
+        avg(relative_humidity) as avg_humidity,
+        max(relative_humidity) as max_humidity,
+        min(relative_humidity) as min_humidity,
+        avg(precipitation_probability) as avg_precipitation_probability,
+        max(precipitation_probability) as max_precipitation_probability,
+        
+        -- Wind aggregations
+        avg(wind_speed_mph) as avg_wind_speed,
+        max(wind_speed_mph) as max_wind_speed,
+        
+        -- Dewpoint aggregations
+        avg(dewpoint_temp) as avg_dewpoint,
+        min(dewpoint_temp) as min_dewpoint,
+        max(dewpoint_temp) as max_dewpoint,
+        
+        -- Weather condition counts
+        count(*) as total_forecasts,
+        count(case when short_forecast = 'Sunny' then 1 end) as sunny_forecasts,
+        count(case when short_forecast = 'Rain' then 1 end) as rain_forecasts,
+        count(case when short_forecast = 'Snow' then 1 end) as snow_forecasts,
+        count(case when short_forecast like '%Cloud%' then 1 end) as cloudy_forecasts,
+        
+        -- Extreme conditions
+        count(case when temperature > 90 then 1 end) as extreme_heat_count,
+        count(case when temperature < 32 then 1 end) as freezing_count,
+        count(case when precipitation_probability > 80 then 1 end) as high_precip_count,
+        
+        -- Metadata
+        current_timestamp() as aggregated_at,
+        max(processed_at) as latest_source_update
+        
+      FROM LIVE.v_silver_weather_source
+      WHERE date(start_time_utc) = current_date() - INTERVAL 1 DAY  -- One day lag
+        AND post_code IS NOT NULL
+      GROUP BY post_code, date(start_time_utc)
+    description: "Aggregate daily weather metrics with one-day lag"
+    
+  # Step 3: Write to gold materialized view for incremental updates
+  - name: "write_daily_aggregates_mv"
+    type: "write"
+    source: "v_daily_weather_aggregates"
+    write_target:
+      type: "materialized_view"
+      database: "{{ catalog }}.{{ gold_schema }}"
+      table: "daily_weather_metrics"
+      refresh_schedule: "0 2 * * *"  # Daily refresh at 2 AM
+      table_properties:
+        quality: "gold"
+        aggregation_level: "daily"
+        lag_days: "1"
+    cluster_columns: ["forecast_date", "post_code"]
+    description: "Materialized view for daily weather aggregations"
+    
+  # Step 4: Create a summary view for top-level analytics
+  - name: "create_weather_summary_view"
+    type: "transform"
+    transform_type: "sql"
+    source: "v_daily_weather_aggregates"
+    target: "v_weather_summary"
+    sql: |
+      SELECT 
+        forecast_date,
+        
+        -- Regional aggregations
+        count(distinct post_code) as postal_codes_reported,
+        avg(min_temperature) as region_min_temp,
+        avg(max_temperature) as region_max_temp,
+        avg(avg_temperature) as region_avg_temp,
+        
+        -- Weather pattern analysis
+        avg(avg_precipitation_probability) as region_avg_precip_prob,
+        avg(avg_humidity) as region_avg_humidity,
+        avg(avg_wind_speed) as region_avg_wind_speed,
+        
+        -- Extreme weather summary
+        sum(extreme_heat_count) as total_extreme_heat_forecasts,
+        sum(freezing_count) as total_freezing_forecasts,
+        sum(high_precip_count) as total_high_precip_forecasts,
+        
+        -- Weather condition percentages
+        round(sum(sunny_forecasts) * 100.0 / sum(total_forecasts), 2) as sunny_percentage,
+        round(sum(rain_forecasts) * 100.0 / sum(total_forecasts), 2) as rain_percentage,
+        round(sum(snow_forecasts) * 100.0 / sum(total_forecasts), 2) as snow_percentage,
+        round(sum(cloudy_forecasts) * 100.0 / sum(total_forecasts), 2) as cloudy_percentage,
+        
+        current_timestamp() as summary_created_at
+        
+      FROM LIVE.v_daily_weather_aggregates
+      GROUP BY forecast_date
+    description: "Regional weather summary for analytics dashboards"
+    
+  # Step 5: Write regional summary to gold table
+  - name: "write_regional_summary"
+    type: "write"
+    source: "v_weather_summary"
+    write_target:
+      type: "streaming_table"
+      database: "{{ catalog }}.{{ gold_schema }}"
+      table: "regional_weather_summary"
+      table_properties:
+        quality: "gold"
+        aggregation_level: "regional"
+        refresh_pattern: "daily"
+    cluster_columns: ["forecast_date"]
+    description: "Regional weather summary table for dashboards" 

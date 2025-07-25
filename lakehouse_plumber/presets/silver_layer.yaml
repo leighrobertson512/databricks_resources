@@ -1,0 +1,26 @@
+# Silver layer preset configuration
+name: "silver_layer"
+
+table_properties:
+  quality: "silver"
+  delta.autoOptimize.optimizeWrite: "true"
+  delta.autoOptimize.autoCompact: "true"
+  delta.enableChangeDataFeed: "true"
+
+# Default expectations
+expectations:
+  - name: "valid_temperature"
+    constraint: "temperature BETWEEN -50 AND 150"
+    action: "expect"
+  - name: "valid_humidity"
+    constraint: "relativeHumidity BETWEEN 0 AND 100"
+    action: "expect"
+  - name: "non_null_post_code"
+    constraint: "post_code IS NOT NULL"
+    action: "expect_or_drop"
+
+# Streaming settings
+streaming:
+  read_change_feed: true
+  max_bytes_per_trigger: "{{ max_bytes_per_trigger }}"
+  checkpoint_location: "{{ checkpoint_location_base }}/silver" 

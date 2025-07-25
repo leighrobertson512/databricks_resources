@@ -1,0 +1,27 @@
+# Gold layer preset configuration
+name: "gold_layer"
+
+table_properties:
+  quality: "gold"
+  delta.autoOptimize.optimizeWrite: "true"
+  delta.autoOptimize.autoCompact: "true"
+  pipelines.aggregation_layer: "true"
+
+# Default materialized view settings
+materialized_view:
+  refresh_schedule: "0 2 * * *"  # Daily at 2 AM
+  warehouse_id: "{{ warehouse_id }}"
+  
+# Performance optimizations
+optimizations:
+  cluster_by: ["forecast_date"]
+  partition_by: []
+  
+# Data quality expectations
+expectations:
+  - name: "valid_aggregation_date"
+    constraint: "forecast_date IS NOT NULL"
+    action: "expect_or_drop"
+  - name: "logical_temperature_range"
+    constraint: "min_temperature <= max_temperature"
+    action: "expect" 

@@ -1,0 +1,15 @@
+# Lakehouse Plumber Framework
+lakehouse-plumber>=0.3.5
+
+# Databricks CLI for deployment
+databricks-cli>=0.17.0
+
+# Data validation and quality
+pydantic>=1.10.0
+
+# YAML processing
+PyYAML>=6.0
+
+# For development and testing
+pytest>=7.0.0
+pytest-cov>=4.0.0 

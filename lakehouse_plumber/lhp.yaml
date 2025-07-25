@@ -1,0 +1,25 @@
+project_name: "weather_data_pipeline"
+version: "1.0.0"
+description: "Weather data pipeline using Lakehouse Plumber framework"
+
+# Global settings
+settings:
+  default_environment: "dev"
+  cleanup_generated_files: true
+  
+# Output configuration
+output:
+  base_path: "./generated"
+  create_bundles: true
+  
+# Default table properties
+defaults:
+  table_properties:
+    delta.autoOptimize.optimizeWrite: "true"
+    delta.autoOptimize.autoCompact: "true"
+  
+# Environment substitution files
+substitutions:
+  dev: "./substitutions/dev.yaml"
+  staging: "./substitutions/staging.yaml"
+  prod: "./substitutions/prod.yaml" 

@@ -1,0 +1,93 @@
+pipeline: "silver_weather_transform"
+flowgroup: "weather_data_cleansing"
+description: "Transform raw weather forecast data into clean silver layer"
+
+# Use silver layer preset
+presets: ["silver_layer"]
+
+actions:
+  # Step 1: Create a view to preprocess the bronze data
+  - name: "preprocess_bronze_forecasts"
+    type: "load"
+    source:
+      type: "delta"
+      database: "{{ catalog }}.{{ bronze_schema }}"
+      table: "{{ bronze_forecasts_table }}"
+      cdc_options:
+        readChangeFeed: "true"
+        maxBytesPerTrigger: "{{ max_bytes_per_trigger }}"
+    target: "v_bronze_forecasts_preprocessed"
+    description: "Load and preprocess bronze weather forecast data"
+    
+  # Step 2: Transform the data with SQL
+  - name: "transform_weather_data"
+    type: "transform"
+    transform_type: "sql"
+    source: "v_bronze_forecasts_preprocessed"
+    target: "v_weather_data_transformed"
+    sql: |
+      SELECT 
+        post_code,
+        number,
+        name,
+        -- Extract timezone and convert timestamps
+        regexp_extract(startTime, '([+-]\\d{2}:\\d{2})$', 1) as timezone_offset,
+        regexp_replace(startTime, '[+-]\\d{2}:\\d{2}$', '') as start_time_clean,
+        regexp_replace(endTime, '[+-]\\d{2}:\\d{2}$', '') as end_time_clean,
+        
+        -- Convert to UTC timestamps
+        CASE 
+          WHEN regexp_extract(startTime, '([+-]\\d{2}:\\d{2})$', 1) != ''
+          THEN from_utc_timestamp(regexp_replace(startTime, '[+-]\\d{2}:\\d{2}$', ''), 
+                                 regexp_extract(startTime, '([+-]\\d{2}:\\d{2})$', 1))
+          ELSE cast(regexp_replace(startTime, '[+-]\\d{2}:\\d{2}$', '') as timestamp)
+        END as start_time_utc,
+        
+        CASE 
+          WHEN regexp_extract(endTime, '([+-]\\d{2}:\\d{2})$', 1) != ''
+          THEN from_utc_timestamp(regexp_replace(endTime, '[+-]\\d{2}:\\d{2}$', ''), 
+                                 regexp_extract(endTime, '([+-]\\d{2}:\\d{2})$', 1))
+          ELSE cast(regexp_replace(endTime, '[+-]\\d{2}:\\d{2}$', '') as timestamp)
+        END as end_time_utc,
+        
+        -- Other fields
+        isDaytime,
+        temperature,
+        temperatureUnit,
+        temperatureTrend,
+        
+        -- Extract numeric wind speed
+        cast(regexp_extract(windSpeed, '(\\d+)', 1) as int) as wind_speed_mph,
+        windDirection as wind_direction,
+        
+        -- Flatten nested structures
+        probabilityOfPrecipitation.value as precipitation_probability,
+        dewpoint.value as dewpoint_temp,
+        relativeHumidity.value as relative_humidity,
+        
+        icon,
+        shortForecast as short_forecast,
+        detailedForecast as detailed_forecast,
+        
+        -- Add processing timestamp
+        current_timestamp() as processed_at,
+        audit_update_ts
+      FROM STREAM(LIVE.v_bronze_forecasts_preprocessed)
+      WHERE post_code IS NOT NULL
+    description: "Clean and transform weather data with timezone conversion"
+    
+  # Step 3: Write to silver streaming table using SCD Type 1
+  - name: "write_weather_silver"
+    type: "write"
+    source: "v_weather_data_transformed"
+    write_target:
+      type: "streaming_table"
+      database: "{{ catalog }}.{{ silver_schema }}"
+      table: "weather_forecasts"
+      table_properties:
+        quality: "silver"
+        delta.enableChangeDataFeed: "true"
+    scd_type: 1
+    merge_keys: ["post_code", "start_time_clean"]
+    sequence_by: "audit_update_ts"
+    description: "Write cleaned weather data to silver layer with SCD Type 1" 
