@@ -17,10 +17,15 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 import re
 
-# Import our custom modules
-from data_discovery_utils import DataDiscoveryAPI
-from visualization_utils import create_summary_charts, create_data_lineage_viz
-from search_utils import SmartSearch, TableRecommendations
+# Import our custom modules with error handling
+try:
+    from data_discovery_utils import DataDiscoveryAPI
+    from visualization_utils import create_summary_charts, create_data_lineage_viz
+    from search_utils import SmartSearch, TableRecommendations
+except ImportError as e:
+    st.error(f"Import error: {e}")
+    st.info("Make sure all utility files are uploaded to the same directory as app.py")
+    st.stop()
 
 # Configure Streamlit page
 st.set_page_config(

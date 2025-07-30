@@ -27,6 +27,12 @@ class DataDiscoveryAPI:
     def _execute_query(self, query: str) -> pd.DataFrame:
         """Execute a SQL query and return results as DataFrame"""
         try:
+            # Import spark context
+            from pyspark.sql import SparkSession
+            spark = SparkSession.getActiveSession()
+            if spark is None:
+                spark = SparkSession.builder.appName("DataDiscoveryApp").getOrCreate()
+            
             # Use Databricks SQL execution
             return spark.sql(query).toPandas()
         except Exception as e:
