@@ -8,6 +8,12 @@
 
 # COMMAND ----------
 
+# MAGIC %sql 
+# MAGIC SELECT * 
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo_upsert
+
+# COMMAND ----------
+
 import random
 import time
 from datetime import datetime, timedelta
@@ -16,7 +22,7 @@ from pyspark.sql.types import StructType, StructField, StringType, LongType, Boo
 import json
 
 # Configuration - matches your existing setup
-source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo'
+source_table = 'leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo_upsert'
 
 # COMMAND ----------
 
@@ -362,9 +368,13 @@ start_hourly_upsert_generation(duration_minutes=5, batch_interval_seconds=30, ho
 # COMMAND ----------
 
 # Example usage - uncomment to run
-# start_hourly_upsert_generation(duration_minutes=2, batch_interval_seconds=30, hours_ahead=12)
+start_hourly_upsert_generation(duration_minutes=2, batch_interval_seconds=30, hours_ahead=12)
 
 # COMMAND ----------
 
 # Test upsert functionality - uncomment to run
 # generate_specific_hour_updates(target_hour_offset=2, temperature_change=15) 
+
+# COMMAND ----------
+
+

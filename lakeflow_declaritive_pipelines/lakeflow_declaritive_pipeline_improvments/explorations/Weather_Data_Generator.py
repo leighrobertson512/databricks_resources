@@ -21,16 +21,43 @@ What I want to capture
 # COMMAND ----------
 
 # MAGIC %sql 
+# MAGIC SELECT * 
+# MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_ldp
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC ALTER TABLE leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo_upsert SET TBLPROPERTIES
+# MAGIC (delta.enableChangeDataFeed=true)
+
+# COMMAND ----------
+
+spark.sql("""
+ALTER TABLE leigh_robertson_demo.silver_noaa.forecasts_expanded_ldp
+DROP COLUMN _change_type, _commit_version, _commit_timestamp
+""")
+
+# COMMAND ----------
+
+# MAGIC %sql 
 # MAGIC -- CREATE TABLE leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded_ldp 
 # MAGIC -- AS SELECT * 
 # MAGIC -- FROM leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded
 # MAGIC -- LIMIT 1;
 # MAGIC
-# MAGIC -- TRUNCATE TABLE leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded_ldp ;
-# MAGIC -- DROP TABLE leigh_robertson_demo.silver_noaa.forecasts_streaming_demo_expanded_ldp; 
+# MAGIC TRUNCATE TABLE leigh_robertson_demo.silver_noaa.forecasts_expanded_ldp ;
+# MAGIC DROP TABLE leigh_robertson_demo.silver_noaa.forecasts_expanded_ldp; 
 # MAGIC
-# MAGIC TRUNCATE TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low_ldp ;
-# MAGIC DROP TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low_ldp; 
+# MAGIC -- TRUNCATE TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low_ldp ;
+# MAGIC -- DROP TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low_ldp; 
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -40,11 +67,11 @@ What I want to capture
 # MAGIC
 # MAGIC -- FROM leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo
 # MAGIC
-# MAGIC CREATE TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low
-# MAGIC AS SELECT *,
-# MAGIC current_timestamp() as audit_update_ts
-# MAGIC FROM leigh_robertson_demo.gold_noaa.ten_day_forecast
-# MAGIC LIMIT 1;
+# MAGIC -- CREATE TABLE leigh_robertson_demo.gold_noaa.forecasts_high_low
+# MAGIC -- AS SELECT *,
+# MAGIC -- current_timestamp() as audit_update_ts
+# MAGIC -- FROM leigh_robertson_demo.gold_noaa.ten_day_forecast
+# MAGIC -- LIMIT 1;
 # MAGIC
 # MAGIC --leigh_robertson_demo.gold_noaa.ten_day_forecast
 # MAGIC -- SELECT 
@@ -554,7 +581,7 @@ def generate_extreme_weather_data(num_records=200):
 # COMMAND ----------
 
 # Example 2: Generate continuous data (uncomment to run)
-start_continuous_generation(duration_minutes=10, batch_interval_seconds=3)
+start_continuous_generation(duration_minutes=3, batch_interval_seconds=3)
 #start_continuous_generation_rdd(duration_minutes=2, batch_interval_seconds=3)
 
 # COMMAND ----------
