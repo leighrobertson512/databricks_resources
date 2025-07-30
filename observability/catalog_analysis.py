@@ -5,12 +5,26 @@ https://medium.com/@rahulgosavi.94/databricks-unity-catalog-analysis-a-comprehen
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ## Configuration Parameters
+# MAGIC Set your target catalog, schema, and table name for the analysis output
+
+# COMMAND ----------
+
+# Configuration Parameters - Modify these as needed
+TARGET_OUTPUT_CATALOG = "leigh_robertson_demo"
+TARGET_OUTPUT_SCHEMA = "bronze" 
+TARGET_OUTPUT_TABLE = "catalog_analysis_results"
+SOURCE_CATALOG_TO_ANALYZE = "leigh_robertson_demo"
+
+# COMMAND ----------
+
 """
 Databricks Unity Catalog Complete Implementation
 ===============================================
 
-A comprehensive solution for Databricks catalog analysis with minimal verbose output.
-Covers all scenarios: catalog inventory, data access, export, and analysis.
+A comprehensive solution for Databricks catalog analysis that writes results to a Delta table.
+Covers all scenarios: catalog inventory, data access, and analysis.
 
 Author: Rahul Gosavi
 Date: 2025-06-16
@@ -514,6 +528,52 @@ class CatalogAnalyzer:
             
         except Exception as e:
             return {'error': f"Export failed: {str(e)}"}
+    
+    def write_to_delta_table(self, analysis: Dict[str, Any], target_catalog: str, target_schema: str, target_table: str) -> Dict[str, str]:
+        """Write analysis results to a Delta table"""
+        if 'error' in analysis or 'inventory' not in analysis:
+            return {'error': 'No valid analysis data to write'}
+        
+        try:
+            inventory_df = analysis['inventory']
+            
+            # Convert pandas DataFrame to Spark DataFrame
+            spark_df = spark.createDataFrame(inventory_df)
+            
+            # Create the full table name
+            full_table_name = f"{target_catalog}.{target_schema}.{target_table}"
+            
+            # Ensure the schema exists
+            spark.sql(f"CREATE SCHEMA IF NOT EXISTS {target_catalog}.{target_schema}")
+            
+            # Write to Delta table (overwrite mode to replace existing data)
+            spark_df.write \
+                .format("delta") \
+                .mode("overwrite") \
+                .option("overwriteSchema", "true") \
+                .saveAsTable(full_table_name)
+            
+            # Add table properties for better metadata
+            spark.sql(f"""
+                ALTER TABLE {full_table_name} 
+                SET TBLPROPERTIES (
+                    'analysis_source_catalog' = '{analysis['catalog_name']}',
+                    'analysis_date' = '{analysis['analysis_date']}',
+                    'total_objects' = '{analysis['total_objects']}',
+                    'delta.autoOptimize.optimizeWrite' = 'true',
+                    'delta.autoOptimize.autoCompact' = 'true'
+                )
+            """)
+            
+            return {
+                'status': 'success', 
+                'table_name': full_table_name,
+                'rows_written': len(inventory_df),
+                'analysis_date': analysis['analysis_date']
+            }
+            
+        except Exception as e:
+            return {'error': f"Delta table write failed: {str(e)}"}
 
 
 def main():
@@ -524,7 +584,7 @@ def main():
     config = CatalogConfig(
         workspace_url=dbutils.secrets.get(scope="leigh_robertson_secrets", key="databricks_aws_e2_url"),
         access_token=dbutils.secrets.get(scope="leigh_robertson_secrets", key="databricks_cli_value"),
-        target_catalog="leigh_robertson_demo"
+        target_catalog=SOURCE_CATALOG_TO_ANALYZE
     )
     
     try:
@@ -555,19 +615,25 @@ def main():
         table_info = analyzer.analyze_table(target_table)
         analyzer.display_table_info(table_info)
         
-        # Scenario 3: Export results
+        # Scenario 3: Write results to Delta table
         print(f"\n{'='*50}")
-        print("SCENARIO 3: Export Analysis")
+        print("SCENARIO 3: Write Analysis to Delta Table")
         print(f"{'='*50}")
         
-        export_results = analyzer.export_analysis(catalog_analysis, ['csv', 'excel', 'json'])
+        write_results = analyzer.write_to_delta_table(
+            catalog_analysis, 
+            TARGET_OUTPUT_CATALOG, 
+            TARGET_OUTPUT_SCHEMA, 
+            TARGET_OUTPUT_TABLE
+        )
         
-        if 'error' not in export_results:
-            print("✅ Export completed:")
-            for format_type, filename in export_results.items():
-                print(f"  📁 {format_type.upper()}: {filename}")
+        if 'error' not in write_results:
+            print("✅ Delta table write completed:")
+            print(f"  📊 Table: {write_results['table_name']}")
+            print(f"  📝 Rows written: {write_results['rows_written']:,}")
+            print(f"  📅 Analysis date: {write_results['analysis_date']}")
         else:
-            print(f"❌ Export failed: {export_results['error']}")
+            print(f"❌ Delta table write failed: {write_results['error']}")
         
         # Scenario 4: Multiple table analysis
         print(f"\n{'='*50}")
@@ -612,37 +678,24 @@ if __name__ == "__main__":
 
 # COMMAND ----------
 
-# The code above outputs the CSV file to the current working directory of the Databricks cluster.
-# The filename is generated as: f"{catalog_name}_analysis_{timestamp}.csv"
-# Example: "leigh_robertson_demo_analysis_20250729_153045.csv"
-# You can check the working directory with:
-import os
-os.getcwd()
+# MAGIC %md
+# MAGIC ## Query the Results
+# MAGIC You can now query the analysis results from the Delta table
 
 # COMMAND ----------
 
 # MAGIC %sql 
+# MAGIC -- Query the catalog analysis results
 # MAGIC SELECT * 
-# MAGIC FROM sample_inct_catalog.bronze.airport_master
+# MAGIC FROM ${TARGET_OUTPUT_CATALOG}.${TARGET_OUTPUT_SCHEMA}.${TARGET_OUTPUT_TABLE}
+# MAGIC ORDER BY created_at DESC
 
 # COMMAND ----------
 
-df = spark.read.csv('/Workspace/Users/leigh.robertson@databricks.com/observability/leigh_robertson_demo_analysis_20250729_204403.csv')
-
-# COMMAND ----------
-
-df.display()
-
-# COMMAND ----------
-
-# Ensure the file path is correct and the file exists
-file_path = "dbfs:/Workspace/Users/leigh.robertson@databricks.com/observability/leigh_robertson_demo_analysis_20250729_204403.csv"
-
-# Read the CSV file into a DataFrame
-df = spark.read.csv(file_path, header=True, inferSchema=True)
-
-# Display the DataFrame
-display(df)
+# Query using PySpark
+target_table_name = f"{TARGET_OUTPUT_CATALOG}.{TARGET_OUTPUT_SCHEMA}.{TARGET_OUTPUT_TABLE}"
+results_df = spark.table(target_table_name)
+display(results_df)
 
 # COMMAND ----------
 
