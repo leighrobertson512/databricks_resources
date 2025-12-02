@@ -119,3 +119,11 @@ query = stream_df.writeStream \
 # MAGIC %sql 
 # MAGIC SELECT *
 # MAGIC FROM leigh_robertson_demo.silver_noaa.forecasts_ss
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+

@@ -13,7 +13,7 @@ from pyspark.sql.functions import lit, current_timestamp
 
 # COMMAND ----------
 
-dbutils.widgets.text('state', 'NY')
+dbutils.widgets.text('state', 'CO')
 
 # COMMAND ----------
 
@@ -86,4 +86,7 @@ for row in df.collect():
 
 # COMMAND ----------
 
-
+# MAGIC %sql 
+# MAGIC SELECT * 
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts
+# MAGIC

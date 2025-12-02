@@ -128,4 +128,37 @@ load_zip_codes(start_zip, end_zip)
 
 # COMMAND ----------
 
+run_id = dbutils.notebook.entry_point.getDbutils().notebook().getContext().currentRunId().get()
+
+import requests
+
+host = "https://<your-workspace-host>"
+token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
+
+api_url = f"{host}/api/2.1/jobs/runs/get?run_id={run_id}"
+headers = {"Authorization": f"Bearer {token}"}
+response = requests.get(api_url, headers=headers)
+run_page_url = response.json()["run_page_url"]
+print(f"Job Run URL: {run_page_url}")
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC SELECT * 
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC DESCRIBE  HISTORY leigh_robertson_demo.bronze_noaa.zip_code;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT count (distinct post_code)
+# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
+# MAGIC WHERE state_abbreviation = 'CO'
+
+# COMMAND ----------
+
 
