@@ -9,7 +9,7 @@ from pyspark.sql.functions import lit, current_timestamp
 
 # COMMAND ----------
 
-# MAGIC %run ./sql_ingestion_framework/utils_file
+# MAGIC %run ../sql_ingestion_framework/utils_file
 
 # COMMAND ----------
 
