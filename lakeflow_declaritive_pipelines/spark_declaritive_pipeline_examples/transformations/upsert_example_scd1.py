@@ -13,7 +13,7 @@ def bronze_forecasts_preprocessed():
         #dlt.read_stream
         spark.readStream
         .option("readChangeFeed", "true")
-        .table('leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo_upsert')
+        .table('leigh_robertson_demo.bronze_noaa.forecasts')
         .withColumn("timezoneOffset", regexp_extract(col("startTime"), r"([+-]\d{2}:\d{2})$", 1))
         .withColumn("startTime", regexp_replace(col("startTime"), r"[+-]\d{2}:\d{2}$", ""))
         .withColumn("endTime", regexp_replace(col("endTime"), r"[+-]\d{2}:\d{2}$", ""))
