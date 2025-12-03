@@ -1,5 +1,9 @@
+#this file shows how to handle 
+
 import dlt
 from pyspark.sql.functions import *
+from utilities import append_audit_columns
+
 
 
 @dlt.view
@@ -9,7 +13,6 @@ def bronze_forecasts_preprocessed():
         #dlt.read_stream
         spark.readStream
         .option("readChangeFeed", "true")
-        #.option("maxBytesPerTrigger", "10g")
         .table('leigh_robertson_demo.bronze_noaa.forecasts_streaming_demo_upsert')
         .withColumn("timezoneOffset", regexp_extract(col("startTime"), r"([+-]\d{2}:\d{2})$", 1))
         .withColumn("startTime", regexp_replace(col("startTime"), r"[+-]\d{2}:\d{2}$", ""))
@@ -23,7 +26,7 @@ def bronze_forecasts_preprocessed():
                          expr("from_utc_timestamp(endTime, timezoneOffset)"))
                     .otherwise(col("endTime")))
         .withColumn("windSpeed", regexp_extract(col("windSpeed"), "(\\d+)", 1).cast("int"))
-        .withColumn("audit_update_ts", current_timestamp())
+        .transform(append_audit_columns.add_audit_columns)
         .withColumn("dewpoint", col("dewpoint.value"))
         .withColumn("probabilityOfPrecipitation", col("probabilityOfPrecipitation.value"))
         .withColumn("relativeHumidity", col("relativeHumidity.value"))
