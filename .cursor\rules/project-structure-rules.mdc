@@ -1,0 +1,42 @@
+---
+alwaysApply: true
+---
+# Project Structure Rules
+
+## Directory Organization
+
+### Root Level
+- `/src/project_name_placeholder/` - Main package code
+- `/src/` - Main notebook code (.ipynb) and Python files that will be called directly
+- `/tests/` - Test files
+- `/docs/` - Documentation
+- `/scripts/` - Development and setup scripts ONLY
+- `/data/` - Internal data ONLY (no scripts)
+- Configuration files (setup.py, requirements.txt, etc.)
+
+### Scripts Location
+- ALL scripts must be in `/scripts/`
+- NEVER put scripts in `/data/`, unless they are data generation scripts
+- NO OTHER DIRECTORIES ALLOWED
+
+### Script Categories
+Development scripts in `/scripts/`:
+- Installation scripts
+- Setup scripts
+- Development utilities
+- Build scripts
+- Test runners
+
+## File Organization
+- Python package code goes in `src/project_name_placeholder/`
+- Tests go in `tests/`
+- Documentation in `docs/`
+- Development scripts in `scripts/`
+- Data files in `/data/`
+
+## Naming Conventions
+- Python files: lowercase with underscores
+- Scripts: descriptive names with appropriate extensions
+- Test files: prefix with `test_`
+- Log files: descriptive with date stamps
+- Database/Data files: clear purpose in filename 
