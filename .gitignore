@@ -16,3 +16,7 @@ env/
 
 # Archived frameworks - not tracked in repo
 archived_frameworks/
+
+# OS Metadata
+.DS_Store
+**/.DS_Store
