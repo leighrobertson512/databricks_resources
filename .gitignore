@@ -9,6 +9,10 @@ settings.json
 *.venv/
 venv/
 env/
+.venv-databricks-resources/
+
+# Editor settings
+.vscode/
 
 # Archived frameworks - not tracked in repo
 archived_frameworks/
