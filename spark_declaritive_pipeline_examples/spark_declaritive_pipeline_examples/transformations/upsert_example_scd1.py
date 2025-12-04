@@ -5,7 +5,7 @@ from pyspark.sql.functions import *
 from utilities import append_audit_columns
 
 
-
+#contains example of using utility functions to append audit columns
 @dp.temporary_view
 @dp.expect("valid_wind_speed", "windSpeed >= 0")
 def bronze_forecasts_preprocessed():
