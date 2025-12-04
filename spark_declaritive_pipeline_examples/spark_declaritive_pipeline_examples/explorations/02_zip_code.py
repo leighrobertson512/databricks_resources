@@ -120,45 +120,4 @@ load_zip_codes(start_zip, end_zip)
 
 # COMMAND ----------
 
-# MAGIC %sql 
-# MAGIC -- SELECT MAX(CAST(post_code AS INT))
-# MAGIC -- FROM ${zip_code_table_name}
-# MAGIC OPTIMIZE ${zip_code_table_name};
-# MAGIC VACUUM ${zip_code_table_name};
-
-# COMMAND ----------
-
-run_id = dbutils.notebook.entry_point.getDbutils().notebook().getContext().currentRunId().get()
-
-import requests
-
-host = workspace_host
-token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
-
-api_url = f"{host}/api/2.1/jobs/runs/get?run_id={run_id}"
-headers = {"Authorization": f"Bearer {token}"}
-response = requests.get(api_url, headers=headers)
-run_page_url = response.json()["run_page_url"]
-print(f"Job Run URL: {run_page_url}")
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC SELECT * 
-# MAGIC FROM ${zip_code_table_name}
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC DESCRIBE HISTORY ${zip_code_table_name};
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC SELECT count (distinct post_code)
-# MAGIC FROM ${zip_code_table_name}
-# MAGIC WHERE state_abbreviation = 'CO'
-
-# COMMAND ----------
-
 

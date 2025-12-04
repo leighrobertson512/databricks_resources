@@ -5,3 +5,7 @@ FROM leigh_robertson_demo.bronze_noaa.forecasts
 WHERE post_code = "80214"
 AND cast(startTime AS date) = current_date()
 
+
+-- COMMAND ----------
+
+
