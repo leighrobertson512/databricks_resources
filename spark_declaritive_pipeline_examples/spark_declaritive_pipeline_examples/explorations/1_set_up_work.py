@@ -1,13 +1,5 @@
 # Databricks notebook source
-#define these variables up front
-catalog = 'leigh_robertson_demo'
-bronze_schema = 'bronze_noaa'
-silver_schema = 'silver_noaa'
-
-#table_specific variables
-zip_code_table_name = 'zip_code'
-forecast_table_name = 'forecasts'
-forecasts_expanded = 'forecasts_expanded'
+# MAGIC %run ./00_variables
 
 # COMMAND ----------
 
@@ -15,7 +7,7 @@ forecasts_expanded = 'forecasts_expanded'
 zip_code_ddl = f"""
 CREATE CATALOG IF NOT EXISTS {catalog};
 CREATE SCHEMA IF NOT EXISTS {catalog}.{bronze_schema};
-CREATE TABLE IF NOT EXISTS {catalog}.{bronze_schema}.{zip_code_table_name} (
+CREATE TABLE IF NOT EXISTS {zip_code_table_name} (
     post_code STRING PRIMARY KEY,
     country STRING,
     country_abbreviation STRING,
@@ -34,7 +26,7 @@ CLUSTER BY AUTO;
 # COMMAND ----------
 
 forecasts_ddl = f"""
-CREATE TABLE IF NOT EXISTS {catalog}.{bronze_schema}.{forecast_table_name} (
+CREATE TABLE IF NOT EXISTS {forecast_table_name} (
     post_code STRING NOT NULL,
     number BIGINT,
     name STRING,
@@ -57,16 +49,16 @@ CREATE TABLE IF NOT EXISTS {catalog}.{bronze_schema}.{forecast_table_name} (
 CLUSTER BY AUTO;
 """
 #spark.sql(zip_code_ddl)
-forecasts_pk_sql = f"ALTER TABLE {catalog}.{bronze_schema}.{forecast_table_name} ADD CONSTRAINT forecasts_pk PRIMARY KEY (post_code, startTime);"
-forecasts_fk_sql = f"ALTER TABLE {catalog}.{bronze_schema}.{forecast_table_name} ADD CONSTRAINT forecasts_fk FOREIGN KEY (post_code) REFERENCES leigh_robertson_demo.bronze_noaa.zip_code(post_code);"
+forecasts_pk_sql = f"ALTER TABLE {forecast_table_name} ADD CONSTRAINT forecasts_pk PRIMARY KEY (post_code, startTime);"
+forecasts_fk_sql = f"ALTER TABLE {forecast_table_name} ADD CONSTRAINT forecasts_fk FOREIGN KEY (post_code) REFERENCES {zip_code_table_name}(post_code);"
 #spark.sql(forecasts_pk_sql)
 #spark.sql(forecasts_fk_sql)
 
 # COMMAND ----------
 
 silver_table_ddl = f"""
-CREATE SCHEMA IF NOT EXISTS {catalog}.;
-CREATE TABLE IF NOT EXISTS  {catalog}.{silver_schema}.{forecasts_expanded} (
+CREATE SCHEMA IF NOT EXISTS {catalog}.{silver_schema};
+CREATE TABLE IF NOT EXISTS {forecasts_expanded_table_name} (
     post_code STRING NOT NULL,
     number LONG,
     name STRING,
@@ -92,8 +84,8 @@ CREATE TABLE IF NOT EXISTS  {catalog}.{silver_schema}.{forecasts_expanded} (
 CLUSTER BY AUTO;
 """
 #spark.sql(silver_table_ddl)
-forecasts_silver_pk_sql = f"ALTER TABLE {catalog}.{silver_schema}.{forecasts_expanded} ADD CONSTRAINT forecasts_pk PRIMARY KEY (post_code, startTime);"
-forecasts_silver_fk_sql = f"ALTER TABLE {catalog}.{silver_schema}.{forecasts_expanded} ADD CONSTRAINT forecasts_fk FOREIGN KEY (post_code) REFERENCES leigh_robertson_demo.bronze_noaa.zip_code(post_code);"
+forecasts_silver_pk_sql = f"ALTER TABLE {forecasts_expanded_table_name} ADD CONSTRAINT forecasts_pk PRIMARY KEY (post_code, startTime);"
+forecasts_silver_fk_sql = f"ALTER TABLE {forecasts_expanded_table_name} ADD CONSTRAINT forecasts_fk FOREIGN KEY (post_code) REFERENCES {zip_code_table_name}(post_code);"
 spark.sql(forecasts_silver_pk_sql)
 spark.sql(forecasts_silver_fk_sql)
 

@@ -3,6 +3,10 @@
 
 # COMMAND ----------
 
+# MAGIC %run ./00_variables
+
+# COMMAND ----------
+
 from noaa_sdk import NOAA
 import pandas as pd
 from pyspark.sql.functions import lit, current_timestamp
@@ -13,7 +17,7 @@ from pyspark.sql.functions import lit, current_timestamp
 
 # COMMAND ----------
 
-dbutils.widgets.text('state', 'CO')
+dbutils.widgets.text('state', default_state)
 
 # COMMAND ----------
 
@@ -50,7 +54,7 @@ def get_and_load_forecasts(postal_code, country_code):
     df_spark = spark.createDataFrame(df).withColumn('post_code', lit(postal_code)).withColumn('audit_update_ts', lit(current_timestamp()))
     df_spark.createOrReplaceTempView('forecasts')
 
-    table_name = 'leigh_robertson_demo.bronze_noaa.forecasts'
+    table_name = forecast_table_name
     match_columns, update_columns, insert_columns = generate_match_insert_columns("post_code, startTime", df_spark)
     merge_sql = dynamic_merge_sql(table_name, "updates", match_columns, update_columns, insert_columns)
     df_spark.createOrReplaceTempView("updates")
@@ -62,33 +66,33 @@ def get_and_load_forecasts(postal_code, country_code):
 state = dbutils.widgets.get('state')
 state_forecasts = f"""
 SELECT distinct post_code
-FROM leigh_robertson_demo.bronze_noaa.zip_code
+FROM {zip_code_table_name}
 WHERE state_abbreviation = '{state}'
 """
 df = spark.sql(state_forecasts)
 for row in df.collect():
     postal_code = row['post_code']
     try:
-        get_and_load_forecasts(postal_code, 'US')
+        get_and_load_forecasts(postal_code, default_country_code)
     except Exception as e:
         print(f'Failed to load forecasts for {postal_code}: {e}')
 
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.forecasts;
-# MAGIC VACUUM leigh_robertson_demo.bronze_noaa.forecasts;
+# MAGIC OPTIMIZE ${forecast_table_name};
+# MAGIC VACUUM ${forecast_table_name};
 
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC DESCRIBE HISTORY leigh_robertson_demo.bronze_noaa.forecasts;
+# MAGIC DESCRIBE HISTORY ${forecast_table_name};
 
 # COMMAND ----------
 
 # MAGIC %sql 
 # MAGIC SELECT * 
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts
+# MAGIC FROM ${forecast_table_name}
 # MAGIC WHERE post_code = '80214'
 # MAGIC AND cast (startTime as date) > current_timestamp() - interval 8 day
 # MAGIC ORDER BY startTime desc

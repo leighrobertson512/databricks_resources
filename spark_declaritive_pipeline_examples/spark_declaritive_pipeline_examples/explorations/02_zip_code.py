@@ -5,6 +5,10 @@ https://www.zippopotam.us/
 
 # COMMAND ----------
 
+# MAGIC %run ./00_variables
+
+# COMMAND ----------
+
 # MAGIC %run ./sql_ingestion_framework/utils_file
 
 # COMMAND ----------
@@ -89,7 +93,7 @@ def load_and_clean_zip_code_data(df):
               .drop("places")        
               )
   df_spark = replace_spaces_in_column_names(df_spark).withColumn("post_code", col("post_code").cast("STRING")) #cast as string to ensure leading zeros are respected
-  table_name = "leigh_robertson_demo.bronze_noaa.zip_code"
+  table_name = zip_code_table_name
   match_columns, update_columns, insert_columns = generate_match_insert_columns("post_code", df_spark)
   merge_sql = dynamic_merge_sql(table_name, "updates", match_columns, update_columns, insert_columns)
   df_spark.createOrReplaceTempView("updates")
@@ -110,11 +114,7 @@ def load_zip_codes(start, end):
             #sleep to limit API calls
         time.sleep(5)
 
-# Define the start and end zip codes
-start_zip = 82556
-end_zip = 99950
-
-# Call the function
+# Call the function with variables from 00_variables
 load_zip_codes(start_zip, end_zip)
 
 
@@ -122,9 +122,9 @@ load_zip_codes(start_zip, end_zip)
 
 # MAGIC %sql 
 # MAGIC -- SELECT MAX(CAST(post_code AS INT))
-# MAGIC -- FROM leigh_robertson_demo.bronze_noaa.zip_code
-# MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.zip_code;
-# MAGIC VACUUM leigh_robertson_demo.bronze_noaa.zip_code;
+# MAGIC -- FROM ${zip_code_table_name}
+# MAGIC OPTIMIZE ${zip_code_table_name};
+# MAGIC VACUUM ${zip_code_table_name};
 
 # COMMAND ----------
 
@@ -132,7 +132,7 @@ run_id = dbutils.notebook.entry_point.getDbutils().notebook().getContext().curre
 
 import requests
 
-host = "https://<your-workspace-host>"
+host = workspace_host
 token = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().get()
 
 api_url = f"{host}/api/2.1/jobs/runs/get?run_id={run_id}"
@@ -145,18 +145,18 @@ print(f"Job Run URL: {run_page_url}")
 
 # MAGIC %sql 
 # MAGIC SELECT * 
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
+# MAGIC FROM ${zip_code_table_name}
 
 # COMMAND ----------
 
 # MAGIC %sql 
-# MAGIC DESCRIBE  HISTORY leigh_robertson_demo.bronze_noaa.zip_code;
+# MAGIC DESCRIBE HISTORY ${zip_code_table_name};
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC SELECT count (distinct post_code)
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
+# MAGIC FROM ${zip_code_table_name}
 # MAGIC WHERE state_abbreviation = 'CO'
 
 # COMMAND ----------
