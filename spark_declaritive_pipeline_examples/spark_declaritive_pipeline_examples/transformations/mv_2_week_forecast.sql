@@ -13,3 +13,4 @@ SELECT
 FROM leigh_robertson_demo.silver_noaa.forecasts_expanded_ldp AS forecasts
 INNER JOIN leigh_robertson_demo.bronze_noaa.zip_code AS zip_code
   ON forecasts.post_code = zip_code.post_code
+WHERE CAST(forecasts.startTimeUTC AS DATE) >= current_date() + 10
