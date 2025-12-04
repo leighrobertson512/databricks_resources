@@ -1,12 +1,12 @@
-import dlt
+from pyspark import pipelines as dp
 from pyspark.sql.functions import *
 
-dlt.create_sink("forecasts_expanded_delta_sink", "delta", {"tableName": "leigh_robertson_demo.silver_noaa.forecasts_expanded_delta_sink"})
+dp.create_sink("forecasts_expanded_delta_sink", "delta", {"tableName": "leigh_robertson_demo.silver_noaa.forecasts_expanded_delta_sink"})
 
 
 
 #@append_flow(name = "flow", target = "my_sink")
-@dlt.append_flow(name = "forecasts_expanded_delta_sink_flow", target="forecasts_expanded_delta_sink")
+@dp.append_flow(name = "forecasts_expanded_delta_sink_flow", target="forecasts_expanded_delta_sink")
 def flowFunc():
     return (
         spark.readStream

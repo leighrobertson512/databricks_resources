@@ -1,13 +1,13 @@
 #this file shows how to handle 
 
-import dlt
+from pyspark import pipelines as dp
 from pyspark.sql.functions import *
 from utilities import append_audit_columns
 
 
 
-@dlt.view
-@dlt.expect_or_drop("valid_wind_speed", "windSpeed >= 0")
+@dp.temporary_view
+@dp.expect("valid_wind_speed", "windSpeed >= 0")
 def bronze_forecasts_preprocessed():
     return (
         #dlt.read_stream
@@ -36,7 +36,7 @@ def bronze_forecasts_preprocessed():
     )
     #return df
 
-dlt.create_streaming_table(
+dp.create_streaming_table(
     name="forecasts_expanded_ldp",
     comment="SCD Type 1 managed silver forecasts",
     table_properties={"quality": "silver"},
@@ -46,7 +46,7 @@ dlt.create_streaming_table(
     # }
 )
 
-dlt.apply_changes(
+dp.create_auto_cdc_flow(
     target = "forecasts_expanded_ldp",
     source = "bronze_forecasts_preprocessed",
     keys = ["post_code", "startTime"],  # Replace with your actual key
