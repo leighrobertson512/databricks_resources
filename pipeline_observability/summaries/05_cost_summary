@@ -1,4 +1,4 @@
-CREATE OR REPLACE TABLE observability.silver.cleaned_costs AS
+CREATE OR REPLACE TABLE leigh_robertson_demo.observability.cleaned_costs AS
 SELECT
     u.usage_start_time AS usage_date,
     p.pipeline_id,
@@ -15,11 +15,11 @@ SELECT
     CASE WHEN u.compute_type = 'job_compute' THEN u.dbu_cost ELSE 0 END AS job_compute_cost,
     CASE WHEN u.compute_type = 'warehouse' THEN u.dbu_cost ELSE 0 END AS warehouse_cost
 FROM system.billing.usage u
-JOIN observability.silver.dlt_event_log_summary p
+JOIN leigh_robertson_demo.observability.dlt_event_log_summary p
   ON u.job_id = p.job_id
 WHERE u.usage_start_time >= date_sub(current_date(), 7);
 
-CREATE TABLE IF NOT EXISTS observability.gold.cost_observability_summary (
+CREATE TABLE IF NOT EXISTS leigh_robertson_demo.observability.cost_observability_summary (
     summary_date DATE,
     pipeline_id STRING,
     pipeline_name STRING,
@@ -62,11 +62,11 @@ SELECT
     ROUND((
         SUM(cost_usd) - LAG(SUM(cost_usd)) OVER (PARTITION BY pipeline_id ORDER BY current_date())
         ) / NULLIF(LAG(SUM(cost_usd)) OVER (PARTITION BY pipeline_id ORDER BY current_date()), 0) * 100, 2) AS cost_trend_pct
-FROM observability.silver.cleaned_costs
+FROM leigh_robertson_demo.observability.cleaned_costs
 WHERE usage_date = current_date()
 GROUP BY pipeline_id, pipeline_name;
 
-MERGE INTO observability.gold.cost_observability_summary tgt
+MERGE INTO leigh_robertson_demo.observability.cost_observability_summary tgt
 USING pipeline_costs_aggregated src
 ON tgt.summary_date = src.summary_date AND tgt.pipeline_id = src.pipeline_id
 WHEN MATCHED THEN

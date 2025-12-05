@@ -27,10 +27,10 @@ SELECT
   COUNT(DISTINCT target_table_name) AS tables_created,
   SUM(CASE WHEN is_streaming = true THEN 1 ELSE 0 END) AS active_streaming_pipelines,
   MAX(CASE WHEN status = 'FAILED' THEN event_time ELSE NULL END) AS last_failure_ts
-FROM observability.silver.event_log_cleaned
+FROM leigh_robertson_demo.observability.event_log_cleaned
 GROUP BY pipeline_name;
 
 CREATE OR REPLACE TABLE leigh_robertson_demo.observability.refresh_dlt_observability_summary AS
 SELECT *
-FROM observability.gold.dlt_observability_summary
+FROM leigh_robertson_demo.observability.dlt_observability_summary
 WHERE summary_date = current_date();
