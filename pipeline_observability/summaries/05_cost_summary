@@ -1,0 +1,75 @@
+CREATE OR REPLACE TABLE leigh_robertson_demo.observability.cleaned_costs AS
+SELECT
+    u.usage_start_time AS usage_date,
+    p.pipeline_id,
+    p.pipeline_name,
+    u.dbu_cost AS cost_usd,
+    u.dbus,
+    p.output_table,
+    p.cluster_type,
+    p.idle_minutes,
+    p.active_minutes,
+    u.dbu_cost > 2 * AVG(u.dbu_cost) OVER (PARTITION BY p.pipeline_id ROWS BETWEEN 7 PRECEDING AND 1 PRECEDING) AS cost_anomaly_flag,
+    -- A simple forecast using 7-day average
+    AVG(u.dbu_cost) OVER (PARTITION BY p.pipeline_id ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) * 7 AS predicted_cost_7d,
+    CASE WHEN u.compute_type = 'job_compute' THEN u.dbu_cost ELSE 0 END AS job_compute_cost,
+    CASE WHEN u.compute_type = 'warehouse' THEN u.dbu_cost ELSE 0 END AS warehouse_cost
+FROM system.billing.usage u
+JOIN leigh_robertson_demo.observability.dlt_event_log_summary p
+  ON u.job_id = p.job_id
+WHERE u.usage_start_time >= date_sub(current_date(), 7);
+
+CREATE TABLE IF NOT EXISTS leigh_robertson_demo.observability.cost_observability_summary (
+    summary_date DATE,
+    pipeline_id STRING,
+    pipeline_name STRING,
+    total_cost_usd DOUBLE,
+    dbus_7d INT,
+    avg_cost_per_pipeline DOUBLE,
+    highest_cost_pipeline STRING,
+    idle_time_pct DOUBLE,
+    cost_anomaly_flag INT,
+    most_expensive_table STRING,
+    cost_forecast_7d DOUBLE,
+    job_compute_cost DOUBLE,
+    warehouse_cost DOUBLE,
+    cost_by_cluster STRING,
+    cost_trend_pct DOUBLE
+)
+USING DELTA
+TBLPROPERTIES (
+  'quality' = 'gold',
+  'description' = 'Daily summary of cost metrics for all DLT pipelines used in Cost Observability'
+);
+
+
+CREATE OR REPLACE TEMP VIEW pipeline_costs_aggregated AS
+SELECT
+    current_date() AS summary_date,
+    pipeline_id,
+    pipeline_name,
+    SUM(cost_usd) AS total_cost_usd,
+    SUM(dbus) AS dbus_7d,
+    ROUND(AVG(cost_usd), 2) AS avg_cost_per_pipeline,
+    FIRST(pipeline_name) OVER (ORDER BY cost_usd DESC) AS highest_cost_pipeline,
+    ROUND(SUM(idle_minutes) / NULLIF(SUM(idle_minutes + active_minutes), 0), 2) * 100 AS idle_time_pct,
+    SUM(cost_anomaly_flag) AS cost_anomaly_flag,
+    FIRST(output_table) OVER (ORDER BY cost_usd DESC) AS most_expensive_table,
+    ROUND(SUM(predicted_cost_7d), 2) AS cost_forecast_7d,
+    ROUND(SUM(job_compute_cost), 2) AS job_compute_cost,
+    ROUND(SUM(warehouse_cost), 2) AS warehouse_cost,
+    FIRST(cluster_type) AS cost_by_cluster,
+    ROUND((
+        SUM(cost_usd) - LAG(SUM(cost_usd)) OVER (PARTITION BY pipeline_id ORDER BY current_date())
+        ) / NULLIF(LAG(SUM(cost_usd)) OVER (PARTITION BY pipeline_id ORDER BY current_date()), 0) * 100, 2) AS cost_trend_pct
+FROM leigh_robertson_demo.observability.cleaned_costs
+WHERE usage_date = current_date()
+GROUP BY pipeline_id, pipeline_name;
+
+MERGE INTO leigh_robertson_demo.observability.cost_observability_summary tgt
+USING pipeline_costs_aggregated src
+ON tgt.summary_date = src.summary_date AND tgt.pipeline_id = src.pipeline_id
+WHEN MATCHED THEN
+  UPDATE SET *
+WHEN NOT MATCHED THEN
+  INSERT *
