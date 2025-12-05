@@ -5,5 +5,5 @@ SELECT
   COUNT(CASE WHEN is_pii = 'Yes' THEN 1 END) AS pii_columns,
   COUNT(DISTINCT schema_name) AS total_schemas,
   COUNT(*) FILTER (WHERE violation_type IS NOT NULL) AS total_violations
-FROM STREAM(leigh_robertson_demo.observability.pii_info)
-LEFT JOIN STREAM(leigh_robertson_demo.observability.pii_violations) USING (catalog_name, schema_name, table_name, column_name);
+FROM leigh_robertson_demo.observability.pii_info
+LEFT JOIN leigh_robertson_demo.observability.pii_violations USING (catalog_name, schema_name, table_name, column_name);
