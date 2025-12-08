@@ -14,11 +14,6 @@ SELECT ROUND(
 FROM leigh_robertson_demo.observability.dlt_dq_summary
 WHERE dq_date = current_date();
 
-SELECT ROUND(
-  (100.0 * SUM(passed_expectations) / NULLIF(SUM(passed_expectations + failed_expectations), 0)) / 10, 1
-)
-FROM leigh_robertson_demo.observability.dlt_dq_summary
-WHERE dq_date = current_date();
 
 SELECT COUNT(DISTINCT dataset)
 FROM leigh_robertson_demo.observability.dlt_dq_violations_cleaned
