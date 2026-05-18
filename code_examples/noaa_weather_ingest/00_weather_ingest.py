@@ -3,6 +3,18 @@
 
 # COMMAND ----------
 
+#define these variables up front
+catalog = 'serverless_stable_phngd8_catalog'
+bronze_schema = 'bronze_noaa'
+silver_schema = 'silver_noaa'
+
+#table_specific variables
+zip_code_table_name = 'zip_code'
+forecast_table_name = 'forecasts'
+forecasts_expanded = 'forecasts_expanded'
+
+# COMMAND ----------
+
 from noaa_sdk import NOAA
 import pandas as pd
 from pyspark.sql.functions import lit, current_timestamp
@@ -50,7 +62,7 @@ def get_and_load_forecasts(postal_code, country_code):
     df_spark = spark.createDataFrame(df).withColumn('post_code', lit(postal_code)).withColumn('audit_update_ts', lit(current_timestamp()))
     df_spark.createOrReplaceTempView('forecasts')
 
-    table_name = 'leigh_robertson_demo.bronze_noaa.forecasts'
+    table_name = f'{catalog}.{bronze_schema}.{forecast_table_name}'
     match_columns, update_columns, insert_columns = generate_match_insert_columns("post_code, startTime", df_spark)
     merge_sql = dynamic_merge_sql(table_name, "updates", match_columns, update_columns, insert_columns)
     df_spark.createOrReplaceTempView("updates")
@@ -62,7 +74,7 @@ def get_and_load_forecasts(postal_code, country_code):
 state = dbutils.widgets.get('state')
 state_forecasts = f"""
 SELECT distinct post_code
-FROM leigh_robertson_demo.bronze_noaa.zip_code
+FROM {catalog}.{bronze_schema}.{zip_code_table_name}
 WHERE state_abbreviation = '{state}'
 """
 df = spark.sql(state_forecasts)

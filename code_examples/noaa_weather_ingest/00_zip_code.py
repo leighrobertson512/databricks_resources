@@ -5,6 +5,18 @@ https://www.zippopotam.us/
 
 # COMMAND ----------
 
+#define these variables up front
+catalog = 'serverless_stable_phngd8_catalog'
+bronze_schema = 'bronze_noaa'
+silver_schema = 'silver_noaa'
+
+#table_specific variables
+zip_code_table_name = 'zip_code'
+forecast_table_name = 'forecasts'
+forecasts_expanded = 'forecasts_expanded'
+
+# COMMAND ----------
+
 # MAGIC %run ./sql_ingestion_framework/utils_file
 
 # COMMAND ----------
@@ -89,7 +101,7 @@ def load_and_clean_zip_code_data(df):
               .drop("places")        
               )
   df_spark = replace_spaces_in_column_names(df_spark).withColumn("post_code", col("post_code").cast("STRING")) #cast as string to ensure leading zeros are respected
-  table_name = "leigh_robertson_demo.bronze_noaa.zip_code"
+  table_name = f"{catalog}.{bronze_schema}.{zip_code_table_name}"
   match_columns, update_columns, insert_columns = generate_match_insert_columns("post_code", df_spark)
   merge_sql = dynamic_merge_sql(table_name, "updates", match_columns, update_columns, insert_columns)
   df_spark.createOrReplaceTempView("updates")
@@ -97,9 +109,9 @@ def load_and_clean_zip_code_data(df):
   zip_code = df_spark.select("post_code").first()[0]
   print(f'Loaded {zip_code}')
 
-
 # COMMAND ----------
 
+# DBTITLE 1,Load Colorado Zips
 def load_zip_codes(start, end):
     for zip_code in range(start, end + 1):
         zip_code = (f'{zip_code:05}')  # Format zip code to be 5 digits
@@ -111,8 +123,9 @@ def load_zip_codes(start, end):
         time.sleep(5)
 
 # Define the start and end zip codes
-start_zip = 82556
-end_zip = 99950
+# This will load all of Colorado 
+start_zip = 80001
+end_zip = 81658
 
 # Call the function
 load_zip_codes(start_zip, end_zip)
@@ -120,11 +133,35 @@ load_zip_codes(start_zip, end_zip)
 
 # COMMAND ----------
 
+# DBTITLE 1,Load California Zip Codes
+def load_zip_codes(start, end):
+    for zip_code in range(start, end + 1):
+        zip_code = (f'{zip_code:05}')  # Format zip code to be 5 digits
+        print(f'loading zip code: {zip_code}')
+        df = get_zip_code_data(zip_code)
+        if df is not None:
+            load_and_clean_zip_code_data(df)
+            #sleep to limit API calls
+        time.sleep(5)
+
+# Define the start and end zip codes
+# This will load all of Colorado 
+start_zip = 90001
+end_zip = 96162
+
+# Call the function
+load_zip_codes(start_zip, end_zip)
+
+# COMMAND ----------
+
+spark.sql(f"OPTIMIZE {catalog}.{bronze_schema}.{zip_code_table_name}")
+spark.sql(f"VACUUM {catalog}.{bronze_schema}.{zip_code_table_name}")
+
+# COMMAND ----------
+
 # MAGIC %sql 
-# MAGIC -- SELECT MAX(CAST(post_code AS INT))
-# MAGIC -- FROM leigh_robertson_demo.bronze_noaa.zip_code
-# MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.zip_code;
-# MAGIC VACUUM leigh_robertson_demo.bronze_noaa.zip_code;
+# MAGIC SELECT * 
+# MAGIC FROM serverless_stable_phngd8_catalog.bronze_noaa.zip_code
 
 # COMMAND ----------
 
@@ -143,21 +180,15 @@ print(f"Job Run URL: {run_page_url}")
 
 # COMMAND ----------
 
-# MAGIC %sql 
-# MAGIC SELECT * 
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
+display(spark.sql(f"SELECT * FROM {catalog}.{bronze_schema}.{zip_code_table_name}"))
 
 # COMMAND ----------
 
-# MAGIC %sql 
-# MAGIC DESCRIBE  HISTORY leigh_robertson_demo.bronze_noaa.zip_code;
+display(spark.sql(f"DESCRIBE HISTORY {catalog}.{bronze_schema}.{zip_code_table_name}"))
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC SELECT count (distinct post_code)
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.zip_code
-# MAGIC WHERE state_abbreviation = 'CO'
+display(spark.sql(f"SELECT count(distinct post_code) FROM {catalog}.{bronze_schema}.{zip_code_table_name} WHERE state_abbreviation = 'CO'"))
 
 # COMMAND ----------
 
