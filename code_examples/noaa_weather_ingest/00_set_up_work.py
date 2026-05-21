@@ -155,4 +155,15 @@ spark.sql(forecasts_silver_fk_sql)
 
 # COMMAND ----------
 
+# %sql
+# ALTER TABLE serverless_stable_phngd8_catalog.bronze_noaa.forecasts  SET TBLPROPERTIES
+# (delta.enableChangeDataFeed=true)
+
+# COMMAND ----------
+
+# MAGIC %sql 
+# MAGIC DESCRIBE DETAIL serverless_stable_phngd8_catalog.bronze_noaa.forecasts 
+
+# COMMAND ----------
+
 

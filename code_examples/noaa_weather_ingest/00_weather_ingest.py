@@ -29,29 +29,6 @@ dbutils.widgets.text('state', 'CO')
 
 # COMMAND ----------
 
-# from noaa_sdk import NOAA
-
-# # Initialize NOAA object
-# n = NOAA()
-
-# # Fetch weather forecast for a specific location (latitude and longitude)
-# lat, lon = 40.7314, -73.8656
-# forecast = n.points_forecast(lat, lon, type='forecastGridData')
-
-# # Print the forecast
-# for item in forecast:
-#     print(item)
-
-# # # Alternatively, fetch forecast by postal code and country code
-# # postal_code = '11365'
-# # country_code = 'US'
-# # forecasts = n.get_forecasts(postal_code, country_code)
-# # for forecast in forecasts:
-# #     print(forecast)
-
-
-# COMMAND ----------
-
 def get_and_load_forecasts(postal_code, country_code):
     n = NOAA()
     #postal_code = '80214'
@@ -87,24 +64,8 @@ for row in df.collect():
 
 # COMMAND ----------
 
-# MAGIC %sql 
-# MAGIC OPTIMIZE leigh_robertson_demo.bronze_noaa.forecasts;
-# MAGIC VACUUM leigh_robertson_demo.bronze_noaa.forecasts;
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC DESCRIBE HISTORY leigh_robertson_demo.bronze_noaa.forecasts;
-
-# COMMAND ----------
-
-# MAGIC %sql 
-# MAGIC SELECT * 
-# MAGIC FROM leigh_robertson_demo.bronze_noaa.forecasts
-# MAGIC WHERE post_code = '80214'
-# MAGIC AND cast (startTime as date) > current_timestamp() - interval 8 day
-# MAGIC ORDER BY startTime desc
-# MAGIC
+spark.sql(f"OPTIMIZE {catalog}.{bronze_schema}.{forecast_table_name};")
+spark.sql(f"VACUUM {catalog}.{bronze_schema}.{forecast_table_name};") 
 
 # COMMAND ----------
 

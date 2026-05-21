@@ -3,6 +3,18 @@
 
 # COMMAND ----------
 
+#define these variables up front
+catalog = 'serverless_stable_phngd8_catalog'
+bronze_schema = 'bronze_noaa'
+silver_schema = 'silver_noaa'
+
+#table_specific variables
+zip_code_table_name = 'zip_code'
+forecast_table_name = 'forecasts'
+forecasts_expanded = 'forecasts_expanded'
+
+# COMMAND ----------
+
 # DBTITLE 1,python_example_working
 import dlt
 from pyspark.sql.functions import *
@@ -16,7 +28,7 @@ def bronze_forecasts_preprocessed():
         spark.readStream
         .option("readChangeFeed", "true")
         #.option("maxBytesPerTrigger", "10g")
-        .table('leigh_robertson_demo.bronze_noaa.forecasts')
+        .table(f'{catalog}.{bronze_schema}.{forecast_table_name}')
         .withColumn("timezoneOffset", regexp_extract(col("startTime"), r"([+-]\d{2}:\d{2})$", 1))
         .withColumn("startTime", regexp_replace(col("startTime"), r"[+-]\d{2}:\d{2}$", ""))
         .withColumn("endTime", regexp_replace(col("endTime"), r"[+-]\d{2}:\d{2}$", ""))
@@ -37,7 +49,7 @@ def bronze_forecasts_preprocessed():
     #return df
 
 dlt.create_streaming_table(
-    name="forecasts_expanded_dlt",
+    name=f"{forecasts_expanded}_dlt",
     comment="SCD Type 1 managed silver forecasts",
     table_properties={"quality": "silver"},
     # constraints={
@@ -47,7 +59,7 @@ dlt.create_streaming_table(
 )
 
 dlt.apply_changes(
-    target = "forecasts_expanded_dlt",
+    target = f"{forecasts_expanded}_dlt",
     source = "bronze_forecasts_preprocessed",
     keys = ["post_code", "startTime"],  # Replace with your actual key
     sequence_by = col("audit_update_ts"),
