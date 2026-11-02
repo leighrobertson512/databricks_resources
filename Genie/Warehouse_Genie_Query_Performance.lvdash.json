@@ -1,0 +1,1954 @@
+{
+  "datasets": [
+    {
+      "name": "warehouses",
+      "displayName": "Warehouse Config",
+      "queryLines": [
+        "SELECT\n",
+        "  warehouse_id,\n",
+        "  warehouse_name,\n",
+        "  warehouse_type,\n",
+        "  warehouse_size,\n",
+        "  warehouse_channel,\n",
+        "  min_clusters,\n",
+        "  max_clusters,\n",
+        "  auto_stop_minutes,\n",
+        "  CASE\n",
+        "    WHEN delete_time IS NOT NULL THEN 'Deleted'\n",
+        "    ELSE 'Active'\n",
+        "  END AS status,\n",
+        "  change_time\n",
+        "FROM\n",
+        "  system.compute.warehouses\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "QUALIFY\n",
+        "  ROW_NUMBER() OVER (PARTITION BY warehouse_id ORDER BY change_time DESC) = 1"
+      ]
+    },
+    {
+      "name": "warehouse_options",
+      "displayName": "Genie Agent Options",
+      "queryLines": [
+        "SELECT DISTINCT\n",
+        "  query_source.genie_space_id AS genie_agent\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND start_time >= CURRENT_TIMESTAMP() - INTERVAL 90 DAYS\n",
+        "ORDER BY\n",
+        "  genie_agent"
+      ]
+    },
+    {
+      "name": "query_volume_trend",
+      "displayName": "Genie Query Volume Trend",
+      "queryLines": [
+        "SELECT\n",
+        "  DATE_TRUNC('DAY', start_time) AS query_date,\n",
+        "  compute.warehouse_id AS warehouse_id,\n",
+        "  COUNT(*) AS query_count,\n",
+        "  PERCENTILE_APPROX(total_duration_ms, 0.50) AS p50_duration_ms,\n",
+        "  PERCENTILE_APPROX(total_duration_ms, 0.99) AS p99_duration_ms\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2\n",
+        "ORDER BY\n",
+        "  1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "Genie Agent",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "pruning_by_table",
+      "displayName": "Per-Table Pruning",
+      "queryLines": [
+        "WITH extracted AS (\n",
+        "  SELECT\n",
+        "    statement_id,\n",
+        "    total_duration_ms,\n",
+        "    pruned_files,\n",
+        "    read_files,\n",
+        "    read_bytes,\n",
+        "    pruned_files_bytes,\n",
+        "    read_files_bytes,\n",
+        "    REPLACE(t.table_ref, '`', '') AS table_name\n",
+        "  FROM\n",
+        "    system.query.history\n",
+        "    LATERAL VIEW\n",
+        "      EXPLODE(\n",
+        "        regexp_extract_all(\n",
+        "          statement_text,\n",
+        "          '(?i)(?:FROM|JOIN)\\\\s+(`?[a-zA-Z0-9_]+`?\\\\.`?[a-zA-Z0-9_]+`?\\\\.`?[a-zA-Z0-9_]+`?)'\n",
+        "        )\n",
+        "      ) t\n",
+        "      AS table_ref\n",
+        "  WHERE\n",
+        "    workspace_id = '7474654445014356'\n",
+        "    AND query_source.genie_space_id IS NOT NULL\n",
+        "    AND (\n",
+        "      :date_range.min IS NULL\n",
+        "      OR start_time >= :date_range.min\n",
+        "    )\n",
+        "    AND (\n",
+        "      :date_range.max IS NULL\n",
+        "      OR start_time <= :date_range.max\n",
+        "    )\n",
+        "    AND (\n",
+        "      :genie_filter IS NULL\n",
+        "      OR array_contains(:genie_filter, query_source.genie_space_id)\n",
+        "    )\n",
+        "    AND pruned_files IS NOT NULL\n",
+        "    AND (pruned_files + read_files) > 0\n",
+        "),\n",
+        "agg AS (\n",
+        "  SELECT\n",
+        "    table_name,\n",
+        "    COUNT(DISTINCT statement_id) AS query_count,\n",
+        "    SUM(read_bytes) AS total_read_bytes,\n",
+        "    SUM(read_files) AS total_read_files,\n",
+        "    ROUND(AVG(pruned_files + read_files), 0) AS avg_total_files,\n",
+        "    ROUND(SUM(read_files_bytes) / NULLIF(SUM(read_files), 0) / 1048576, 2) AS avg_file_size_mb,\n",
+        "    AVG(CAST(pruned_files AS DOUBLE) / (pruned_files + read_files)) AS avg_file_pruning_ratio,\n",
+        "    AVG(\n",
+        "      CASE\n",
+        "        WHEN\n",
+        "          (pruned_files_bytes + read_files_bytes) > 0\n",
+        "        THEN\n",
+        "          CAST(pruned_files_bytes AS DOUBLE) / (pruned_files_bytes + read_files_bytes)\n",
+        "      END\n",
+        "    ) AS avg_bytes_pruning_ratio,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.50) AS p50_duration_ms,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.99) AS p99_duration_ms\n",
+        "  FROM\n",
+        "    extracted\n",
+        "  WHERE\n",
+        "    table_name NOT LIKE '%__databricks_internal%'\n",
+        "  GROUP BY\n",
+        "    table_name\n",
+        ")\n",
+        "SELECT\n",
+        "  *,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      avg_total_files >= 100\n",
+        "      AND avg_file_size_mb < 32\n",
+        "    THEN\n",
+        "      'Small files: run OPTIMIZE or enable predictive optimization'\n",
+        "    WHEN\n",
+        "      avg_total_files >= 100\n",
+        "      AND avg_file_pruning_ratio < 0.5\n",
+        "    THEN\n",
+        "      'Low pruning: add liquid clustering on columns Genie filters by'\n",
+        "    ELSE 'No action needed'\n",
+        "  END AS recommended_action\n",
+        "FROM\n",
+        "  agg\n",
+        "ORDER BY\n",
+        "  total_read_bytes DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "Genie Agent",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "genie_perf",
+      "displayName": "Genie Performance",
+      "queryLines": [
+        "WITH base AS (\n",
+        "  SELECT\n",
+        "    query_source.genie_space_id AS genie_space_id,\n",
+        "    compute.warehouse_id AS warehouse_id,\n",
+        "    COUNT(*) AS query_count,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.25) AS p25_total_ms,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.50) AS p50_total_ms,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.75) AS p75_total_ms,\n",
+        "    PERCENTILE_APPROX(total_duration_ms, 0.99) AS p99_total_ms,\n",
+        "    PERCENTILE_APPROX(waiting_for_compute_duration_ms, 0.50) AS p50_wait_compute_ms,\n",
+        "    PERCENTILE_APPROX(waiting_for_compute_duration_ms, 0.99) AS p99_wait_compute_ms,\n",
+        "    PERCENTILE_APPROX(waiting_at_capacity_duration_ms, 0.50) AS p50_wait_capacity_ms,\n",
+        "    PERCENTILE_APPROX(waiting_at_capacity_duration_ms, 0.99) AS p99_wait_capacity_ms,\n",
+        "    PERCENTILE_APPROX(execution_duration_ms, 0.50) AS p50_execution_ms,\n",
+        "    PERCENTILE_APPROX(execution_duration_ms, 0.99) AS p99_execution_ms,\n",
+        "    PERCENTILE_APPROX(compilation_duration_ms, 0.50) AS p50_compilation_ms,\n",
+        "    PERCENTILE_APPROX(compilation_duration_ms, 0.99) AS p99_compilation_ms,\n",
+        "    PERCENTILE_APPROX(total_task_duration_ms, 0.50) AS p50_task_ms,\n",
+        "    PERCENTILE_APPROX(total_task_duration_ms, 0.99) AS p99_task_ms,\n",
+        "    PERCENTILE_APPROX(result_fetch_duration_ms, 0.50) AS p50_fetch_ms,\n",
+        "    PERCENTILE_APPROX(result_fetch_duration_ms, 0.99) AS p99_fetch_ms,\n",
+        "    COALESCE(AVG(waiting_for_compute_duration_ms), 0) AS avg_wait_compute_ms,\n",
+        "    COALESCE(AVG(waiting_at_capacity_duration_ms), 0) AS avg_wait_capacity_ms,\n",
+        "    COALESCE(AVG(compilation_duration_ms), 0) AS avg_compilation_ms,\n",
+        "    COALESCE(AVG(execution_duration_ms), 0) AS avg_execution_ms,\n",
+        "    COALESCE(AVG(result_fetch_duration_ms), 0) AS avg_fetch_ms\n",
+        "  FROM\n",
+        "    system.query.history\n",
+        "  WHERE\n",
+        "    workspace_id = '7474654445014356'\n",
+        "    AND query_source.genie_space_id IS NOT NULL\n",
+        "    AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "    AND (\n",
+        "      :date_range.min IS NULL\n",
+        "      OR start_time >= :date_range.min\n",
+        "    )\n",
+        "    AND (\n",
+        "      :date_range.max IS NULL\n",
+        "      OR start_time <= :date_range.max\n",
+        "    )\n",
+        "    AND (\n",
+        "      :genie_filter IS NULL\n",
+        "      OR array_contains(:genie_filter, query_source.genie_space_id)\n",
+        "    )\n",
+        "  GROUP BY\n",
+        "    1,\n",
+        "    2\n",
+        "),\n",
+        "tagged AS (\n",
+        "  SELECT\n",
+        "    *,\n",
+        "    CASE\n",
+        "      WHEN\n",
+        "        avg_wait_capacity_ms\n",
+        "          >= GREATEST(avg_wait_compute_ms, avg_compilation_ms, avg_execution_ms, avg_fetch_ms)\n",
+        "      THEN\n",
+        "        'Queueing at capacity'\n",
+        "      WHEN\n",
+        "        avg_wait_compute_ms >= GREATEST(avg_compilation_ms, avg_execution_ms, avg_fetch_ms)\n",
+        "      THEN\n",
+        "        'Compute startup'\n",
+        "      WHEN avg_compilation_ms >= GREATEST(avg_execution_ms, avg_fetch_ms) THEN 'Compilation'\n",
+        "      WHEN avg_execution_ms >= avg_fetch_ms THEN 'Execution'\n",
+        "      ELSE 'Result fetch'\n",
+        "    END AS primary_bottleneck\n",
+        "  FROM\n",
+        "    base\n",
+        ")\n",
+        "SELECT\n",
+        "  *,\n",
+        "  CASE primary_bottleneck\n",
+        "    WHEN\n",
+        "      'Queueing at capacity'\n",
+        "    THEN\n",
+        "      'Raise max clusters (scaling) or give this Genie agent a dedicated warehouse'\n",
+        "    WHEN 'Compute startup' THEN 'Use serverless or lengthen auto-stop so the warehouse stays warm'\n",
+        "    WHEN\n",
+        "      'Compilation'\n",
+        "    THEN\n",
+        "      'Simplify tables/views exposed to Genie (fewer nested views and joins); keep stats current with ANALYZE'\n",
+        "    WHEN\n",
+        "      'Execution'\n",
+        "    THEN\n",
+        "      'Improve pruning (liquid clustering, OPTIMIZE) or size up the warehouse; see pruning tables below'\n",
+        "    ELSE 'Return smaller results: aggregate or LIMIT in Genie instructions and example SQL'\n",
+        "  END AS recommended_action\n",
+        "FROM\n",
+        "  tagged\n",
+        "ORDER BY\n",
+        "  query_count DESC"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "Genie Agent",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "worst_pruned",
+      "displayName": "Worst Pruned Queries",
+      "queryLines": [
+        "SELECT\n",
+        "  statement_id,\n",
+        "  query_source.genie_space_id AS genie_space_id,\n",
+        "  compute.warehouse_id AS warehouse_id,\n",
+        "  LEFT(statement_text, 200) AS statement_snippet,\n",
+        "  total_duration_ms,\n",
+        "  pruned_files,\n",
+        "  read_files,\n",
+        "  pruned_files + read_files AS total_files,\n",
+        "  ROUND(read_files_bytes / NULLIF(read_files, 0) / 1048576, 2) AS avg_file_size_mb,\n",
+        "  ROUND(\n",
+        "    CAST(pruned_files AS DOUBLE) / NULLIF(pruned_files + read_files, 0),\n",
+        "    4\n",
+        "  ) AS file_pruning_ratio,\n",
+        "  read_bytes,\n",
+        "  read_rows,\n",
+        "  pruned_files_bytes,\n",
+        "  read_files_bytes,\n",
+        "  ROUND(\n",
+        "    CAST(pruned_files_bytes AS DOUBLE) / NULLIF(pruned_files_bytes + read_files_bytes, 0),\n",
+        "    4\n",
+        "  ) AS bytes_pruning_ratio,\n",
+        "  start_time\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND (pruned_files + read_files) > 0\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (\n",
+        "    :genie_filter IS NULL\n",
+        "    OR array_contains(:genie_filter, query_source.genie_space_id)\n",
+        "  )\n",
+        "ORDER BY\n",
+        "  file_pruning_ratio ASC,\n",
+        "  read_bytes DESC\n",
+        "LIMIT 100"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "Genie Agent",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "genie_time_breakdown",
+      "displayName": "Genie Time Breakdown",
+      "queryLines": [
+        "SELECT\n",
+        "  compute.warehouse_id AS warehouse_id,\n",
+        "  'Wait for Compute' AS phase,\n",
+        "  AVG(waiting_for_compute_duration_ms) AS avg_duration_ms\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  compute.warehouse_id,\n",
+        "  'Wait at Capacity',\n",
+        "  AVG(waiting_at_capacity_duration_ms)\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  compute.warehouse_id,\n",
+        "  'Compilation',\n",
+        "  AVG(compilation_duration_ms)\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  compute.warehouse_id,\n",
+        "  'Execution',\n",
+        "  AVG(execution_duration_ms)\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1\n",
+        "UNION ALL\n",
+        "SELECT\n",
+        "  compute.warehouse_id,\n",
+        "  'Result Fetch',\n",
+        "  AVG(result_fetch_duration_ms)\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (:genie_filter IS NULL OR array_contains(:genie_filter, query_source.genie_space_id))\n",
+        "GROUP BY\n",
+        "  1"
+      ],
+      "parameters": [
+        {
+          "displayName": "Date Range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "Genie Agent",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "genie_kpi_summary",
+      "displayName": "Genie KPI Summary",
+      "queryLines": [
+        "SELECT\n",
+        "  statement_id,\n",
+        "  query_source.genie_space_id AS genie_space_id,\n",
+        "  compute.warehouse_id AS warehouse_id,\n",
+        "  execution_duration_ms,\n",
+        "  execution_duration_ms / 1000.0 AS execution_duration_s,\n",
+        "  CAST(pruned_files_bytes AS DOUBLE)\n",
+        "    * 100\n",
+        "    / NULLIF(pruned_files_bytes + read_files_bytes, 0) AS bytes_pruned_pct,\n",
+        "  CAST(pruned_files AS DOUBLE) * 100 / NULLIF(pruned_files + read_files, 0) AS files_pruned_pct\n",
+        "FROM\n",
+        "  system.query.history\n",
+        "WHERE\n",
+        "  workspace_id = '7474654445014356'\n",
+        "  AND query_source.genie_space_id IS NOT NULL\n",
+        "  AND statement_text NOT LIKE '%__databricks_internal%'\n",
+        "  AND (\n",
+        "    :date_range.min IS NULL\n",
+        "    OR start_time >= :date_range.min\n",
+        "  )\n",
+        "  AND (\n",
+        "    :date_range.max IS NULL\n",
+        "    OR start_time <= :date_range.max\n",
+        "  )\n",
+        "  AND (\n",
+        "    :genie_filter IS NULL\n",
+        "    OR array_contains(:genie_filter, query_source.genie_space_id)\n",
+        "  )"
+      ],
+      "parameters": [
+        {
+          "displayName": "date_range",
+          "keyword": "date_range",
+          "dataType": "DATETIME",
+          "complexType": "RANGE",
+          "defaultSelection": {
+            "range": {
+              "dataType": "DATETIME",
+              "min": {
+                "value": "now-30d/d"
+              },
+              "max": {
+                "value": "now/d"
+              }
+            }
+          }
+        },
+        {
+          "displayName": "genie_filter",
+          "keyword": "genie_filter",
+          "dataType": "STRING",
+          "complexType": "MULTI",
+          "defaultSelection": {
+            "operator": {
+              "operator": "AND"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "a514610d",
+      "displayName": "Genie Warehouse Performance",
+      "layout": [
+        {
+          "widget": {
+            "name": "header",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Genie Warehouse Performance\n",
+                "One-stop view of Genie agent query latency, where the time goes, warehouse configuration, and table pruning/file layout, with recommended actions. Filter by Genie Agent and date range."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "wh_config_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "warehouses",
+                  "fields": [
+                    {
+                      "name": "warehouse_name",
+                      "expression": "`warehouse_name`"
+                    },
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "warehouse_type",
+                      "expression": "`warehouse_type`"
+                    },
+                    {
+                      "name": "warehouse_size",
+                      "expression": "`warehouse_size`"
+                    },
+                    {
+                      "name": "min_clusters",
+                      "expression": "`min_clusters`"
+                    },
+                    {
+                      "name": "max_clusters",
+                      "expression": "`max_clusters`"
+                    },
+                    {
+                      "name": "auto_stop_minutes",
+                      "expression": "`auto_stop_minutes`"
+                    },
+                    {
+                      "name": "warehouse_channel",
+                      "expression": "`warehouse_channel`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouse Configuration"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "warehouse_name"
+                  },
+                  {
+                    "fieldName": "warehouse_id"
+                  },
+                  {
+                    "fieldName": "warehouse_type"
+                  },
+                  {
+                    "fieldName": "warehouse_size"
+                  },
+                  {
+                    "fieldName": "min_clusters"
+                  },
+                  {
+                    "fieldName": "max_clusters"
+                  },
+                  {
+                    "fieldName": "auto_stop_minutes"
+                  },
+                  {
+                    "fieldName": "warehouse_channel"
+                  },
+                  {
+                    "fieldName": "status"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 38,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "volume_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "query_volume_trend",
+                  "fields": [
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "query_date",
+                      "expression": "`query_date`"
+                    },
+                    {
+                      "name": "sum(query_count)",
+                      "expression": "SUM(`query_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Daily Genie Query Volume by Warehouse"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "query_date",
+                  "displayName": "query_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(query_count)",
+                  "displayName": "query_count",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "warehouse_id",
+                  "displayName": "warehouse_id",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "duration_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "query_volume_trend",
+                  "fields": [
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "query_date",
+                      "expression": "`query_date`"
+                    },
+                    {
+                      "name": "sum(p50_duration_ms)",
+                      "expression": "SUM(`p50_duration_ms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Genie P50 Duration Trend"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "query_date",
+                  "displayName": "query_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(p50_duration_ms)",
+                  "displayName": "p50_duration_ms",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "warehouse_id",
+                  "displayName": "warehouse_id",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 19,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "definitions",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Metric definitions and actions\n",
+                "| Metric | Definition | If high, it means | Concrete action |\n",
+                "|---|---|---|---|\n",
+                "| total_duration_ms | End-to-end wall-clock time of the statement | Slow Genie answers | Use the phase metrics below to find the bottleneck |\n",
+                "| waiting_for_compute_duration_ms | Time waiting for the warehouse to start or provision compute | Cold starts | Use serverless; lengthen auto-stop for the Genie warehouse |\n",
+                "| waiting_at_capacity_duration_ms | Time queued because all clusters were at max concurrency | Warehouse is saturated | Raise max clusters, or give Genie a dedicated warehouse |\n",
+                "| compilation_duration_ms | Parsing, analysis, optimization and metadata loading (Delta log, file listing) | Complex views/joins or heavy metadata (often many small files) | Simplify views exposed to Genie, run OPTIMIZE, keep stats current with ANALYZE |\n",
+                "| execution_duration_ms | Wall-clock time spent executing the plan | Large scans or under-sized warehouse | Improve pruning (liquid clustering), size up warehouse |\n",
+                "| total_task_duration_ms | Sum of all task time across all cores; can far exceed wall-clock | Total compute work; high vs execution = heavy scan | Reduce data read via pruning; larger size if parallelism is maxed |\n",
+                "| result_fetch_duration_ms | Time returning results to the client | Large result sets | Aggregate or LIMIT in Genie instructions and example SQL |\n",
+                "| read_files / pruned_files | Files scanned vs files skipped via data skipping | Low pruning = full scans | Cluster on columns Genie filters by |\n",
+                "| total files (pruned + read) | Files in scope of the table snapshot; proxy for table size in files | Many files | Check avg file size |\n",
+                "| read_files_bytes / pruned_files_bytes | Bytes scanned vs bytes skipped | Same as files, weighted by size | Same as above |\n",
+                "| avg file size (MB) | read_files_bytes / read_files | Under ~32 MB with 100+ files = small files problem | OPTIMIZE or enable predictive optimization (target ~128 MB-1 GB) |\n",
+                "\n",
+                "*Per-table figures come from table names parsed from SQL text; multi-table queries attribute query-level metrics to each table.*"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_queries",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "fields": [
+                    {
+                      "name": "sum(query_count)",
+                      "expression": "SUM(`query_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Genie Queries"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(query_count)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_agents",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "fields": [
+                    {
+                      "name": "countdistinct(genie_space_id)",
+                      "expression": "COUNT(DISTINCT `genie_space_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Genie Agents"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(genie_space_id)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 9,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_wh",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "fields": [
+                    {
+                      "name": "countdistinct(warehouse_id)",
+                      "expression": "COUNT(DISTINCT `warehouse_id`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Warehouses Used by Genie"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(warehouse_id)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 9,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "genie_perf_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "fields": [
+                    {
+                      "name": "genie_space_id",
+                      "expression": "`genie_space_id`"
+                    },
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "query_count",
+                      "expression": "`query_count`"
+                    },
+                    {
+                      "name": "primary_bottleneck",
+                      "expression": "`primary_bottleneck`"
+                    },
+                    {
+                      "name": "recommended_action",
+                      "expression": "`recommended_action`"
+                    },
+                    {
+                      "name": "p50_total_ms",
+                      "expression": "`p50_total_ms`"
+                    },
+                    {
+                      "name": "p99_total_ms",
+                      "expression": "`p99_total_ms`"
+                    },
+                    {
+                      "name": "p50_wait_compute_ms",
+                      "expression": "`p50_wait_compute_ms`"
+                    },
+                    {
+                      "name": "p99_wait_compute_ms",
+                      "expression": "`p99_wait_compute_ms`"
+                    },
+                    {
+                      "name": "p50_wait_capacity_ms",
+                      "expression": "`p50_wait_capacity_ms`"
+                    },
+                    {
+                      "name": "p99_wait_capacity_ms",
+                      "expression": "`p99_wait_capacity_ms`"
+                    },
+                    {
+                      "name": "p50_compilation_ms",
+                      "expression": "`p50_compilation_ms`"
+                    },
+                    {
+                      "name": "p99_compilation_ms",
+                      "expression": "`p99_compilation_ms`"
+                    },
+                    {
+                      "name": "p50_execution_ms",
+                      "expression": "`p50_execution_ms`"
+                    },
+                    {
+                      "name": "p99_execution_ms",
+                      "expression": "`p99_execution_ms`"
+                    },
+                    {
+                      "name": "p50_task_ms",
+                      "expression": "`p50_task_ms`"
+                    },
+                    {
+                      "name": "p99_task_ms",
+                      "expression": "`p99_task_ms`"
+                    },
+                    {
+                      "name": "p50_fetch_ms",
+                      "expression": "`p50_fetch_ms`"
+                    },
+                    {
+                      "name": "p99_fetch_ms",
+                      "expression": "`p99_fetch_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Genie Agent + Warehouse Performance"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "genie_space_id",
+                    "displayName": "Genie Agent"
+                  },
+                  {
+                    "fieldName": "warehouse_id"
+                  },
+                  {
+                    "fieldName": "query_count"
+                  },
+                  {
+                    "fieldName": "primary_bottleneck"
+                  },
+                  {
+                    "fieldName": "recommended_action"
+                  },
+                  {
+                    "fieldName": "p50_total_ms"
+                  },
+                  {
+                    "fieldName": "p99_total_ms"
+                  },
+                  {
+                    "fieldName": "p50_wait_compute_ms"
+                  },
+                  {
+                    "fieldName": "p99_wait_compute_ms"
+                  },
+                  {
+                    "fieldName": "p50_wait_capacity_ms"
+                  },
+                  {
+                    "fieldName": "p99_wait_capacity_ms"
+                  },
+                  {
+                    "fieldName": "p50_compilation_ms"
+                  },
+                  {
+                    "fieldName": "p99_compilation_ms"
+                  },
+                  {
+                    "fieldName": "p50_execution_ms"
+                  },
+                  {
+                    "fieldName": "p99_execution_ms"
+                  },
+                  {
+                    "fieldName": "p50_task_ms"
+                  },
+                  {
+                    "fieldName": "p99_task_ms"
+                  },
+                  {
+                    "fieldName": "p50_fetch_ms"
+                  },
+                  {
+                    "fieldName": "p99_fetch_ms"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_pruning",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pruning_by_table",
+                  "fields": [
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    },
+                    {
+                      "name": "recommended_action",
+                      "expression": "`recommended_action`"
+                    },
+                    {
+                      "name": "query_count",
+                      "expression": "`query_count`"
+                    },
+                    {
+                      "name": "avg_total_files",
+                      "expression": "`avg_total_files`"
+                    },
+                    {
+                      "name": "avg_file_size_mb",
+                      "expression": "`avg_file_size_mb`"
+                    },
+                    {
+                      "name": "avg_file_pruning_ratio",
+                      "expression": "`avg_file_pruning_ratio`"
+                    },
+                    {
+                      "name": "avg_bytes_pruning_ratio",
+                      "expression": "`avg_bytes_pruning_ratio`"
+                    },
+                    {
+                      "name": "total_read_files",
+                      "expression": "`total_read_files`"
+                    },
+                    {
+                      "name": "total_read_bytes",
+                      "expression": "`total_read_bytes`"
+                    },
+                    {
+                      "name": "p50_duration_ms",
+                      "expression": "`p50_duration_ms`"
+                    },
+                    {
+                      "name": "p99_duration_ms",
+                      "expression": "`p99_duration_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Pruning and File Layout by Table"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "table_name"
+                  },
+                  {
+                    "fieldName": "recommended_action"
+                  },
+                  {
+                    "fieldName": "query_count"
+                  },
+                  {
+                    "fieldName": "avg_total_files"
+                  },
+                  {
+                    "fieldName": "avg_file_size_mb"
+                  },
+                  {
+                    "fieldName": "avg_file_pruning_ratio"
+                  },
+                  {
+                    "fieldName": "avg_bytes_pruning_ratio"
+                  },
+                  {
+                    "fieldName": "total_read_files"
+                  },
+                  {
+                    "fieldName": "total_read_bytes"
+                  },
+                  {
+                    "fieldName": "p50_duration_ms"
+                  },
+                  {
+                    "fieldName": "p99_duration_ms"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 24,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "worst_queries",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "worst_pruned",
+                  "fields": [
+                    {
+                      "name": "statement_id",
+                      "expression": "`statement_id`"
+                    },
+                    {
+                      "name": "genie_space_id",
+                      "expression": "`genie_space_id`"
+                    },
+                    {
+                      "name": "warehouse_id",
+                      "expression": "`warehouse_id`"
+                    },
+                    {
+                      "name": "statement_snippet",
+                      "expression": "`statement_snippet`"
+                    },
+                    {
+                      "name": "file_pruning_ratio",
+                      "expression": "`file_pruning_ratio`"
+                    },
+                    {
+                      "name": "bytes_pruning_ratio",
+                      "expression": "`bytes_pruning_ratio`"
+                    },
+                    {
+                      "name": "total_files",
+                      "expression": "`total_files`"
+                    },
+                    {
+                      "name": "read_files",
+                      "expression": "`read_files`"
+                    },
+                    {
+                      "name": "pruned_files",
+                      "expression": "`pruned_files`"
+                    },
+                    {
+                      "name": "avg_file_size_mb",
+                      "expression": "`avg_file_size_mb`"
+                    },
+                    {
+                      "name": "read_bytes",
+                      "expression": "`read_bytes`"
+                    },
+                    {
+                      "name": "read_rows",
+                      "expression": "`read_rows`"
+                    },
+                    {
+                      "name": "total_duration_ms",
+                      "expression": "`total_duration_ms`"
+                    },
+                    {
+                      "name": "start_time",
+                      "expression": "`start_time`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Worst-Pruned Genie Queries"
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "statement_id"
+                  },
+                  {
+                    "fieldName": "genie_space_id",
+                    "displayName": "Genie Agent"
+                  },
+                  {
+                    "fieldName": "warehouse_id"
+                  },
+                  {
+                    "fieldName": "statement_snippet"
+                  },
+                  {
+                    "fieldName": "file_pruning_ratio"
+                  },
+                  {
+                    "fieldName": "bytes_pruning_ratio"
+                  },
+                  {
+                    "fieldName": "total_files"
+                  },
+                  {
+                    "fieldName": "read_files"
+                  },
+                  {
+                    "fieldName": "pruned_files"
+                  },
+                  {
+                    "fieldName": "avg_file_size_mb"
+                  },
+                  {
+                    "fieldName": "read_bytes"
+                  },
+                  {
+                    "fieldName": "read_rows"
+                  },
+                  {
+                    "fieldName": "total_duration_ms"
+                  },
+                  {
+                    "fieldName": "start_time"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 31,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_avg_exec",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "fields": [
+                    {
+                      "name": "avg(execution_duration_s)",
+                      "expression": "AVG(`execution_duration_s`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Avg Execution (s)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(execution_duration_s)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_max_exec",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "fields": [
+                    {
+                      "name": "max(execution_duration_s)",
+                      "expression": "MAX(`execution_duration_s`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Max Execution (s)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(execution_duration_s)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 11,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_bytes_pruned",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "fields": [
+                    {
+                      "name": "avg(bytes_pruned_pct)",
+                      "expression": "AVG(`bytes_pruned_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Bytes Pruned %"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(bytes_pruned_pct)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 11,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_files_pruned",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "fields": [
+                    {
+                      "name": "avg(files_pruned_pct)",
+                      "expression": "AVG(`files_pruned_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Files Pruned %"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(files_pruned_pct)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 11,
+            "width": 3,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "global_filters",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "date_range_filter",
+            "queries": [
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee55190693394f4668260845_date_range",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee3710529040acf672c27ba8_date_range",
+                "query": {
+                  "datasetName": "pruning_by_table",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee7513f89172e85bf0352e5b_date_range",
+                "query": {
+                  "datasetName": "worst_pruned",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee9917488ebae2592ff1e8cf_date_range",
+                "query": {
+                  "datasetName": "genie_time_breakdown",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fde5a1e869920dd3fa83a0dc5_date_range",
+                "query": {
+                  "datasetName": "query_volume_trend",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1d668851718149cc5caabf79b4441_date_range",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "parameters": [
+                    {
+                      "name": "date_range",
+                      "keyword": "date_range"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Date Range",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee55190693394f4668260845_date_range"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee3710529040acf672c27ba8_date_range"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee7513f89172e85bf0352e5b_date_range"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee9917488ebae2592ff1e8cf_date_range"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fde5a1e869920dd3fa83a0dc5_date_range"
+                  },
+                  {
+                    "parameterName": "date_range",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1d668851718149cc5caabf79b4441_date_range"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "warehouse_filter",
+            "queries": [
+              {
+                "name": "dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fdded19eabea3d8b3931aa6b1_genie_agent",
+                "query": {
+                  "datasetName": "warehouse_options",
+                  "fields": [
+                    {
+                      "name": "genie_agent",
+                      "expression": "`genie_agent`"
+                    },
+                    {
+                      "name": "genie_agent_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee55190693394f4668260845_genie_filter",
+                "query": {
+                  "datasetName": "genie_perf",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee3710529040acf672c27ba8_genie_filter",
+                "query": {
+                  "datasetName": "pruning_by_table",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee7513f89172e85bf0352e5b_genie_filter",
+                "query": {
+                  "datasetName": "worst_pruned",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee9917488ebae2592ff1e8cf_genie_filter",
+                "query": {
+                  "datasetName": "genie_time_breakdown",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fde5a1e869920dd3fa83a0dc5_genie_filter",
+                "query": {
+                  "datasetName": "query_volume_trend",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1d668851718149cc5caabf79b4441_genie_filter",
+                "query": {
+                  "datasetName": "genie_kpi_summary",
+                  "parameters": [
+                    {
+                      "name": "genie_filter",
+                      "keyword": "genie_filter"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Genie Agent",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "genie_agent",
+                    "queryName": "dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fdded19eabea3d8b3931aa6b1_genie_agent"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee55190693394f4668260845_genie_filter"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee3710529040acf672c27ba8_genie_filter"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee7513f89172e85bf0352e5b_genie_filter"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fee9917488ebae2592ff1e8cf_genie_filter"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1ce5fde5a1e869920dd3fa83a0dc5_genie_filter"
+                  },
+                  {
+                    "parameterName": "genie_filter",
+                    "queryName": "parameter_dashboards/01f1ce5fa60717a894bf2a26c2a2c7e5/datasets/01f1d668851718149cc5caabf79b4441_genie_filter"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 6,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
